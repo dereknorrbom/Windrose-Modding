@@ -14,10 +14,10 @@ Alternative (recommended): use `.local/.env` and let the CLI auto-load it.
 Copy-Item "..\..\.local\.env.example" "..\..\.local\.env"
 ```
 
-## Prepare 3x hide overrides
+## Prepare 3x boar loot overrides (leather + meat)
 
 ```powershell
-python "..\..\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --project-dir ".\" --multiplier 3.0
+python "..\..\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --project-dir ".\" --multiplier 3.0 --resource-types "leather,meat"
 ```
 
 ## Config source
@@ -38,6 +38,12 @@ These configs support tokens:
 ```powershell
 powershell -ExecutionPolicy Bypass -File ".\scripts\build_install.ps1"
 ```
+
+## Nexus Mods description
+
+Use the BBCode-ready text in:
+
+- `docs/NEXUS_DESCRIPTION.txt`
 
 ## Backup Mods
 

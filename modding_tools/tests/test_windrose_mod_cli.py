@@ -23,9 +23,16 @@ cli = _load_cli_module()
 
 
 def test_scale_value_rounding_and_floor():
+    assert cli.scale_value(0, 3.0) == 0
     assert cli.scale_value(1, 0.1) == 1
     assert cli.scale_value(2, 1.5) == 3
     assert cli.scale_value(5, 3.0) == 15
+
+
+def test_parse_resource_types_accepts_csv_and_rejects_invalid():
+    assert cli.parse_resource_types("leather, meat") == {"leather", "meat"}
+    with pytest.raises(ValueError):
+        cli.parse_resource_types("leather,unknown")
 
 
 def test_slug_and_pak_name_helpers():
@@ -204,6 +211,7 @@ def test_cmd_prepare_boar_hide_json_mod_requires_aes(monkeypatch: pytest.MonkeyP
         pak_path="pakchunk0-Windows.pak",
         project_dir=str(tmp_path),
         multiplier=2.0,
+        resource_types="leather",
         repak_path="",
     )
     with pytest.raises(ValueError):
@@ -219,6 +227,7 @@ def test_cmd_prepare_boar_hide_json_mod_writes_scaled_files(tmp_path: Path, monk
 
     paths = [
         "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar_Leather.json",
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar_Meat.json",
         "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_BoarMega_Leather.json",
     ]
     sample_json = {
@@ -242,6 +251,7 @@ def test_cmd_prepare_boar_hide_json_mod_writes_scaled_files(tmp_path: Path, monk
         pak_path="pakchunk0-Windows.pak",
         project_dir=str(project_dir),
         multiplier=3.0,
+        resource_types="leather,meat",
         repak_path="",
     )
     assert cli.cmd_prepare_boar_hide_json_mod(args) == 0
@@ -251,4 +261,5 @@ def test_cmd_prepare_boar_hide_json_mod_writes_scaled_files(tmp_path: Path, monk
     assert data["LootData"][0]["Min"] == 3
     assert data["LootData"][0]["Max"] == 6
     report = json.loads((project_dir / "docs" / "boar_hide_edit_report.json").read_text(encoding="utf-8"))
-    assert report["edited_file_count"] == 2
+    assert report["edited_file_count"] == 3
+    assert report["resource_types"] == ["leather", "meat"]

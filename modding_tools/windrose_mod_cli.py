@@ -24,6 +24,10 @@ DEFAULT_GAME_MODS_DIR = Path(
 BOAR_LEATHER_JSON_PATTERN = re.compile(
     r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar(?:F|Mega)?_Leather(?:_[0-9]+)?\.json$"
 )
+BOAR_RSS_JSON_PATTERN = re.compile(
+    r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar(?:F|Mega)?_(?P<resource>[A-Za-z]+)(?:_[0-9]+)?\.json$"
+)
+SUPPORTED_BOAR_RESOURCE_TYPES = {"leather", "meat", "fat", "tusk", "boarhead"}
 
 
 def repo_root() -> Path:
@@ -679,7 +683,20 @@ def cmd_build_install(args: argparse.Namespace) -> int:
 
 
 def scale_value(value: int, multiplier: float) -> int:
+    if value <= 0:
+        return 0
     return max(1, int(round(value * multiplier)))
+
+
+def parse_resource_types(raw: str) -> set[str]:
+    values = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    if not values:
+        raise ValueError("At least one resource type is required.")
+    invalid = sorted(values - SUPPORTED_BOAR_RESOURCE_TYPES)
+    if invalid:
+        valid = ", ".join(sorted(SUPPORTED_BOAR_RESOURCE_TYPES))
+        raise ValueError(f"Unsupported boar resource type(s): {', '.join(invalid)}. Valid: {valid}")
+    return values
 
 
 def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
@@ -687,6 +704,7 @@ def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
     aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "").strip()
     if not aes_key:
         raise ValueError("AES key is required. Pass --aes-key or set WINDROSE_AES_KEY.")
+    target_resource_types = parse_resource_types(args.resource_types)
     pak_path_input = Path(args.pak_path)
     if pak_path_input.is_absolute():
         pak_path = pak_path_input
@@ -708,11 +726,15 @@ def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
     candidates = []
     for line in list_out.splitlines():
         path = line.strip()
-        if BOAR_LEATHER_JSON_PATTERN.match(path):
+        match = BOAR_RSS_JSON_PATTERN.match(path)
+        if not match:
+            continue
+        resource = match.group("resource").lower()
+        if resource in target_resource_types:
             candidates.append(path)
 
     if not candidates:
-        raise RuntimeError("No boar leather JSON entries found in pak.")
+        raise RuntimeError("No matching boar resource JSON entries found in pak.")
 
     edited = []
     for path in sorted(set(candidates)):
@@ -755,6 +777,7 @@ def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
         "generated_utc": utc_now_iso(),
         "pak_path": str(pak_path),
         "multiplier": args.multiplier,
+        "resource_types": sorted(target_resource_types),
         "edited_file_count": len(edited),
         "edited_files": edited,
     }
@@ -919,6 +942,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=2.0,
         help="Scale factor for Min/Max hide quantities (default: 2.0)",
+    )
+    p_prepare_json.add_argument(
+        "--resource-types",
+        default="leather",
+        help="Comma-separated boar resources to scale: leather, meat, fat, tusk, boarhead",
     )
     p_prepare_json.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_prepare_json.set_defaults(func=cmd_prepare_boar_hide_json_mod)

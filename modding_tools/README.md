@@ -69,10 +69,10 @@ Initialize a new reusable mod scaffold:
 python ".\modding_tools\windrose_mod_cli.py" init-mod --name "My New Mod"
 ```
 
-Prepare boar hide overrides (example 3x):
+Prepare boar resource overrides (example 3x leather + meat):
 
 ```powershell
-python ".\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --project-dir ".\mods\boar-loot" --multiplier 3.0
+python ".\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --project-dir ".\mods\boar-loot" --multiplier 3.0 --resource-types "leather,meat"
 ```
 
 Build + install:
