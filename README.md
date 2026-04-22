@@ -21,3 +21,9 @@ This repository is structured to support multiple Windrose mods over time, while
 - Use `mods/boar-loot/docs/build_config.example.json` as the tracked template.
 - Keep real local runtime config in `.local/` (example templates in `config/`).
 - Keep generated artifacts (`output/`, backups) out of version control.
+
+## CI and Release Automation
+
+- GitHub Actions CI runs `pytest` on every push to `main` and on every pull request.
+- `release-please` is configured for conventional-commit driven releases and changelog generation.
+- Release tags follow `vX.Y.Z` for the monorepo; changelog is written to `CHANGELOG.md`.
