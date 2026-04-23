@@ -87,6 +87,12 @@ Prepare cayenne pepper overrides (example 3x):
 python ".\modding_tools\windrose_mod_cli.py" prepare-cayenne-pepper-json-mod --project-dir ".\mods\cayenne-pepper-yield" --multiplier 3.0
 ```
 
+Prepare generic mob RSS overrides (example crocodile 3x):
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" prepare-mob-rss-json-mod --mob-keywords "crocodile,corruptedcrocodile,whitecrocodile" --project-dir ".\mods\crocodile-bounty" --report-name "crocodile_loot_edit_report" --multiplier 3.0
+```
+
 Build + install:
 
 ```powershell

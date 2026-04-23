@@ -1,4 +1,4 @@
-# Cayenne Pepper Yield
+# Cayenne Bounty
 
 Scaffolded Windrose mod project for `cayenne-pepper-yield`.
 

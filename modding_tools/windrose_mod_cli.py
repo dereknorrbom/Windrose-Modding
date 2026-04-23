@@ -32,6 +32,9 @@ CAYENNE_PEPPER_PATHS = [
     "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/DA_LT_Foliage_Bush_Pepper.json",
     "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/Sub_tables/DA_LT_Foliage_Bush_Pepper_Pepper.json",
 ]
+MOB_RSS_JSON_PATTERN = re.compile(
+    r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_(?P<mob>[A-Za-z0-9]+)_(?P<resource>[A-Za-z0-9]+)(?:_[0-9]+)?\.json$"
+)
 
 
 def repo_root() -> Path:
@@ -862,6 +865,13 @@ def parse_resource_types(raw: str) -> set[str]:
     return values
 
 
+def parse_keywords(raw: str) -> set[str]:
+    values = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    if not values:
+        raise ValueError("At least one mob keyword is required.")
+    return values
+
+
 def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
     repak = resolve_tool("repak.exe", args.repak_path)
     aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "").strip()
@@ -946,6 +956,93 @@ def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
     }
     write_json(report_path, report)
     print(f"Prepared boar hide JSON overrides in: {staged_root}")
+    print(f"Wrote report: {report_path}")
+    return 0
+
+
+def cmd_prepare_mob_rss_json_mod(args: argparse.Namespace) -> int:
+    repak = resolve_tool("repak.exe", args.repak_path)
+    aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "").strip()
+    if not aes_key:
+        raise ValueError("AES key is required. Pass --aes-key or set WINDROSE_AES_KEY.")
+    target_keywords = parse_keywords(args.mob_keywords)
+
+    pak_path_input = Path(args.pak_path)
+    if pak_path_input.is_absolute():
+        pak_path = pak_path_input
+    else:
+        paks_dir_env = os.environ.get("WINDROSE_PAKS_DIR", "").strip()
+        if paks_dir_env:
+            pak_path = Path(paks_dir_env) / pak_path_input
+        else:
+            pak_path = (Path.cwd() / pak_path_input).resolve()
+    project_dir = Path(args.project_dir)
+    staged_root = Path(args.staged_root) if args.staged_root else (project_dir / "input" / "staged")
+    report_path = (
+        Path(args.report_path)
+        if args.report_path
+        else (project_dir / "docs" / f"{args.report_name}.json")
+    )
+
+    if not pak_path.exists():
+        raise FileNotFoundError(f"Pak not found: {pak_path}")
+    staged_root.mkdir(parents=True, exist_ok=True)
+
+    list_out = run_cmd_capture([str(repak), "--aes-key", aes_key, "list", str(pak_path)])
+    candidates = []
+    for line in list_out.splitlines():
+        path = line.strip()
+        match = MOB_RSS_JSON_PATTERN.match(path)
+        if not match:
+            continue
+        mob_name = match.group("mob").lower()
+        if any(keyword in mob_name for keyword in target_keywords):
+            candidates.append(path)
+
+    if not candidates:
+        raise RuntimeError("No matching mob RSS JSON entries found in pak.")
+
+    edited = []
+    for path in sorted(set(candidates)):
+        raw = run_cmd_capture([str(repak), "--aes-key", aes_key, "get", str(pak_path), path])
+        data = json.loads(raw)
+        file_edits = []
+        for item in data.get("LootData", []):
+            if not isinstance(item, dict):
+                continue
+            if "Min" not in item or "Max" not in item:
+                continue
+            old_min = int(item["Min"])
+            old_max = int(item["Max"])
+            new_min = scale_value(old_min, args.multiplier)
+            new_max = scale_value(old_max, args.multiplier)
+            item["Min"] = new_min
+            item["Max"] = new_max
+            file_edits.append(
+                {
+                    "old_min": old_min,
+                    "old_max": old_max,
+                    "new_min": new_min,
+                    "new_max": new_max,
+                }
+            )
+
+        out_file = staged_root / Path(path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        edited.append({"path": path, "output_file": str(out_file), "edits": file_edits})
+
+    report = {
+        "generated_utc": utc_now_iso(),
+        "pak_path": str(pak_path),
+        "multiplier": args.multiplier,
+        "mob_keywords": sorted(target_keywords),
+        "edited_file_count": len(edited),
+        "edited_files": edited,
+        "notes": ["Loot chances/weights are unchanged. Only Min/Max quantities are scaled."],
+    }
+    write_json(report_path, report)
+    print(f"Prepared mob RSS JSON overrides in: {staged_root}")
     print(f"Wrote report: {report_path}")
     return 0
 
@@ -1244,6 +1341,54 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_prepare_json.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_prepare_json.set_defaults(func=cmd_prepare_boar_hide_json_mod)
+
+    p_prepare_mob_rss = sub.add_parser(
+        "prepare-mob-rss-json-mod",
+        help="Extract mob resource loot JSON tables from pak and scale Min/Max values",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--mob-keywords",
+        required=True,
+        help="Comma-separated mob keyword filters, example: crocodile,corruptedcrocodile,whitecrocodile",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--aes-key",
+        default="",
+        help="AES key (hex or base64). Optional if WINDROSE_AES_KEY is set.",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--pak-path",
+        default="pakchunk0-Windows.pak",
+        help="Pak file containing mob RSS loot JSON entries. If relative, resolves via WINDROSE_PAKS_DIR.",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--project-dir",
+        required=True,
+        help="Mod project directory root",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--staged-root",
+        default="",
+        help="Optional explicit staged output root. Defaults to <project_dir>/input/staged",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--report-name",
+        default="mob_rss_edit_report",
+        help="Report filename without extension (default: mob_rss_edit_report)",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--report-path",
+        default="",
+        help="Optional explicit report path. Overrides --report-name location.",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--multiplier",
+        type=float,
+        default=2.0,
+        help="Scale factor for Min/Max quantities (default: 2.0)",
+    )
+    p_prepare_mob_rss.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
+    p_prepare_mob_rss.set_defaults(func=cmd_prepare_mob_rss_json_mod)
 
     p_prepare_cayenne = sub.add_parser(
         "prepare-cayenne-pepper-json-mod",

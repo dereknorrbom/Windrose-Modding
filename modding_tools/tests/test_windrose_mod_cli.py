@@ -417,3 +417,48 @@ def test_cmd_prepare_cayenne_pepper_json_mod_scales_pepper_only(tmp_path: Path, 
     # Seed link row should remain unchanged.
     assert data["LootData"][1]["Min"] == 1
     assert data["LootData"][1]["Max"] == 1
+
+
+def test_cmd_prepare_mob_rss_json_mod_filters_and_scales(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    paks_dir = tmp_path / "paks"
+    paks_dir.mkdir()
+    (paks_dir / "pakchunk0-Windows.pak").write_bytes(b"pak")
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+
+    paths = [
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Crocodile_Leather.json",
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_CorruptedCrocodile_Bones.json",
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar_Leather.json",
+    ]
+    sample_json = {"LootData": [{"Min": 1, "Max": 2, "LootItem": "X", "LootTable": "None"}]}
+
+    def fake_run_capture(cmd, cwd=None):
+        if "list" in cmd:
+            return "\n".join(paths)
+        if "get" in cmd:
+            return json.dumps(sample_json)
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("repak.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture", fake_run_capture)
+
+    project_dir = tmp_path / "mods" / "crocodile-bounty"
+    args = argparse.Namespace(
+        mob_keywords="crocodile",
+        aes_key="0xabc",
+        pak_path="pakchunk0-Windows.pak",
+        project_dir=str(project_dir),
+        staged_root="",
+        report_name="crocodile_loot_edit_report",
+        report_path="",
+        multiplier=3.0,
+        repak_path="",
+    )
+    assert cli.cmd_prepare_mob_rss_json_mod(args) == 0
+
+    croc_file = project_dir / "input" / "staged" / "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Crocodile_Leather.json"
+    data = json.loads(croc_file.read_text(encoding="utf-8"))
+    assert data["LootData"][0]["Min"] == 3
+    assert data["LootData"][0]["Max"] == 6
+    boar_file = project_dir / "input" / "staged" / "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar_Leather.json"
+    assert not boar_file.exists()

@@ -1,7 +1,7 @@
 {
-  "name": "CayennePepperYield",
+  "name": "CayenneBounty",
   "input_dir": "<REPO_ROOT>\\mods\\cayenne-pepper-yield\\input\\staged",
-  "output_pak": "<REPO_ROOT>\\mods\\cayenne-pepper-yield\\output\\CayennePepperYield_P.pak",
+  "output_pak": "<REPO_ROOT>\\mods\\cayenne-pepper-yield\\output\\CayenneBounty_P.pak",
   "mods_dir": "<WINDROSE_MODS_DIR>",
   "mount_point": "../../../",
   "version": "V11",

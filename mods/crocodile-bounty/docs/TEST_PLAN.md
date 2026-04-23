@@ -1,4 +1,4 @@
-# Cayenne Bounty Test Plan
+# Crocodile Bounty Test Plan
 
 ## Automated
 
