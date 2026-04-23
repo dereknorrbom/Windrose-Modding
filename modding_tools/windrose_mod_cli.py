@@ -710,11 +710,25 @@ def multiplier_label(multiplier: float) -> str:
     return text.replace(".", "p")
 
 
-def run_prepare_template(template: str, multiplier: float, project_dir: Path) -> None:
+def run_prepare_template(
+    template: str,
+    multiplier: float,
+    project_dir: Path,
+    variant_staged_dir: Path,
+    variant_output_pak: Path,
+) -> None:
+    project_dir_str = str(project_dir)
+    variant_staged_dir_str = str(variant_staged_dir)
+    variant_output_pak_str = str(variant_output_pak)
     command = template.format(
         multiplier=multiplier,
         multiplier_label=multiplier_label(multiplier),
-        project_dir=str(project_dir),
+        project_dir=project_dir_str,
+        variant_staged_dir=variant_staged_dir_str,
+        variant_output_pak=variant_output_pak_str,
+        project_dir_quoted=f'"{project_dir_str}"',
+        variant_staged_dir_quoted=f'"{variant_staged_dir_str}"',
+        variant_output_pak_quoted=f'"{variant_output_pak_str}"',
     )
     run_shell_command(command, cwd=workspace_root())
 
@@ -753,11 +767,23 @@ def cmd_build_variants(args: argparse.Namespace) -> int:
     mount_point = resolve_config_string(str(config.get("mount_point", "../../../")), config_path, "mount_point")
     version = resolve_config_string(str(config.get("version", "V11")), config_path, "version")
     compression = resolve_config_string(str(config.get("compression", "")), config_path, "compression")
+    generated_root = Path(args.generated_root) if args.generated_root else (output_pak.parent / "generated")
+
+    has_safe_placeholder = ("{variant_staged_dir}" in args.prepare_command_template) or (
+        "{variant_staged_dir_quoted}" in args.prepare_command_template
+    )
+    if args.prepare_command_template and not has_safe_placeholder and not args.allow_unsafe_prepare_template:
+        raise ValueError(
+            "prepare-command-template must include {variant_staged_dir} or {variant_staged_dir_quoted} "
+            "for safe variant generation. "
+            "Use --allow-unsafe-prepare-template to bypass."
+        )
 
     report: dict[str, object] = {
         "generated_utc": utc_now_iso(),
         "config": str(config_path),
         "project_dir": str(project_dir),
+        "generated_root": str(generated_root),
         "multipliers": multipliers,
         "variants": [],
     }
@@ -765,8 +791,20 @@ def cmd_build_variants(args: argparse.Namespace) -> int:
     backup_done = False
     for mult in multipliers:
         label = multiplier_label(mult)
+        variant_staged_dir = generated_root / f"x{label}" / "staged"
+        if variant_staged_dir.exists():
+            shutil.rmtree(variant_staged_dir)
+        shutil.copytree(input_dir, variant_staged_dir)
+        variant_output = output_pak.with_name(f"{output_pak.stem}_x{label}{output_pak.suffix}")
+
         if args.prepare_command_template:
-            run_prepare_template(args.prepare_command_template, mult, project_dir)
+            run_prepare_template(
+                args.prepare_command_template,
+                mult,
+                project_dir,
+                variant_staged_dir,
+                variant_output,
+            )
 
         should_install = label in install_multiplier_labels
         if should_install and args.backup_first and not backup_done:
@@ -777,9 +815,8 @@ def cmd_build_variants(args: argparse.Namespace) -> int:
             if removed:
                 print(f"Removed {removed} existing variant pak(s) from mods dir")
 
-        variant_output = output_pak.with_name(f"{output_pak.stem}_x{label}{output_pak.suffix}")
         pack_args = argparse.Namespace(
-            input_dir=str(input_dir),
+            input_dir=str(variant_staged_dir),
             output_pak=str(variant_output),
             mount_point=mount_point,
             version=version,
@@ -792,6 +829,7 @@ def cmd_build_variants(args: argparse.Namespace) -> int:
             {
                 "multiplier": mult,
                 "label": label,
+                "variant_staged_dir": str(variant_staged_dir),
                 "output_pak": str(variant_output),
                 "installed": should_install,
             }
@@ -836,7 +874,7 @@ def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
         else:
             pak_path = (Path.cwd() / pak_path_input).resolve()
     project_dir = Path(args.project_dir)
-    staged_root = project_dir / "input" / "staged"
+    staged_root = Path(args.staged_root) if args.staged_root else (project_dir / "input" / "staged")
     report_path = project_dir / "docs" / "boar_hide_edit_report.json"
 
     if not pak_path.exists():
@@ -1054,7 +1092,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help=(
             "Optional shell command run before each variant build. Supports {multiplier}, "
-            "{multiplier_label}, and {project_dir} placeholders."
+            "{multiplier_label}, {project_dir}, {variant_staged_dir}, {variant_output_pak}, plus *_quoted variants."
         ),
     )
     p_build_variants.add_argument(
@@ -1077,6 +1115,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Optional output path for variant build report JSON",
     )
+    p_build_variants.add_argument(
+        "--generated-root",
+        default="",
+        help="Optional directory for generated per-variant staged folders (default: <output>/generated)",
+    )
+    p_build_variants.add_argument(
+        "--allow-unsafe-prepare-template",
+        action="store_true",
+        help="Allow prepare template without {variant_staged_dir}; not recommended.",
+    )
     p_build_variants.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_build_variants.set_defaults(func=cmd_build_variants)
 
@@ -1098,6 +1146,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--project-dir",
         default=str(workspace_root() / "mods" / "boar-loot"),
         help="Mod project directory root",
+    )
+    p_prepare_json.add_argument(
+        "--staged-root",
+        default="",
+        help="Optional explicit staged output root. Defaults to <project_dir>/input/staged",
     )
     p_prepare_json.add_argument(
         "--multiplier",

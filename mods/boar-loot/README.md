@@ -23,7 +23,7 @@ python "..\..\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --pr
 ## Build multiple variants (2x, 3x, 5x, 10x)
 
 ```powershell
-python "..\..\modding_tools\windrose_mod_cli.py" build-variants --config "..\..\.local\boar-loot.build.json" --multipliers "2,3,5,10" --project-dir "." --prepare-command-template "python ..\..\modding_tools\windrose_mod_cli.py prepare-boar-hide-json-mod --project-dir {project_dir} --multiplier {multiplier} --resource-types leather,meat,tusk"
+python "..\..\modding_tools\windrose_mod_cli.py" build-variants --config "..\..\.local\boar-loot.build.json" --multipliers "2,3,5,10" --project-dir "." --prepare-command-template "python ..\..\modding_tools\windrose_mod_cli.py prepare-boar-hide-json-mod --project-dir {project_dir_quoted} --staged-root {variant_staged_dir_quoted} --multiplier {multiplier} --resource-types leather,meat,tusk"
 ```
 
 ## Config source

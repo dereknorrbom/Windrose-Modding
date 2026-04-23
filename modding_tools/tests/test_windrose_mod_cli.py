@@ -203,6 +203,9 @@ def test_cmd_build_install_resolves_config_and_dispatches(tmp_path: Path, monkey
     }
     cfg_path = repo / "cfg.json"
     cfg_path.write_text(json.dumps(config), encoding="utf-8")
+    source_staged = repo / "mods" / "boar" / "input" / "staged"
+    source_staged.mkdir(parents=True)
+    (source_staged / "seed.txt").write_text("x", encoding="utf-8")
 
     calls = {"backup": None, "pack": None}
 
@@ -243,13 +246,16 @@ def test_cmd_build_variants_runs_prepare_pack_and_report(tmp_path: Path, monkeyp
     }
     cfg_path = repo / "cfg.json"
     cfg_path.write_text(json.dumps(config), encoding="utf-8")
+    source_staged = repo / "mods" / "boar" / "input" / "staged"
+    source_staged.mkdir(parents=True)
+    (source_staged / "seed.txt").write_text("x", encoding="utf-8")
 
     prep_calls = []
     backup_calls = []
     pack_calls = []
 
-    def fake_prepare(template, multiplier, project_dir):
-        prep_calls.append((template, multiplier, project_dir))
+    def fake_prepare(template, multiplier, project_dir, variant_staged_dir, variant_output_pak):
+        prep_calls.append((template, multiplier, project_dir, variant_staged_dir, variant_output_pak))
 
     def fake_backup(ns):
         backup_calls.append(ns)
@@ -266,23 +272,29 @@ def test_cmd_build_variants_runs_prepare_pack_and_report(tmp_path: Path, monkeyp
     args = argparse.Namespace(
         config=str(cfg_path),
         multipliers="2,3,5",
-        prepare_command_template="prepare --mult {multiplier}",
+        prepare_command_template="prepare --mult {multiplier} --staged {variant_staged_dir}",
         project_dir=str(repo / "mods" / "boar"),
         install_multipliers="5",
         backup_first=True,
         report_path="",
+        generated_root="",
+        allow_unsafe_prepare_template=False,
         repak_path="",
     )
     assert cli.cmd_build_variants(args) == 0
     assert len(prep_calls) == 3
     assert len(pack_calls) == 3
     assert len(backup_calls) == 1
+    assert len(prep_calls) == 3
+    assert prep_calls[0][3].as_posix().endswith("/mods/boar/output/generated/x2/staged")
+    assert pack_calls[0].input_dir.endswith(r"mods\boar\output\generated\x2\staged")
     assert pack_calls[0].output_pak.endswith("Boar_x2.pak")
     assert pack_calls[1].output_pak.endswith("Boar_x3.pak")
     assert pack_calls[2].output_pak.endswith("Boar_x5.pak")
     assert pack_calls[2].install_to_mods.endswith("mods_install")
     report = json.loads((repo / "mods" / "boar" / "output" / "variant_build_report.json").read_text(encoding="utf-8"))
     assert report["multipliers"] == [2.0, 3.0, 5.0]
+    assert report["generated_root"].endswith(r"mods\boar\output\generated")
 
 
 def test_cmd_prepare_boar_hide_json_mod_requires_aes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -291,6 +303,7 @@ def test_cmd_prepare_boar_hide_json_mod_requires_aes(monkeypatch: pytest.MonkeyP
         aes_key="",
         pak_path="pakchunk0-Windows.pak",
         project_dir=str(tmp_path),
+        staged_root="",
         multiplier=2.0,
         resource_types="leather",
         repak_path="",
@@ -331,6 +344,7 @@ def test_cmd_prepare_boar_hide_json_mod_writes_scaled_files(tmp_path: Path, monk
         aes_key="0xabc",
         pak_path="pakchunk0-Windows.pak",
         project_dir=str(project_dir),
+        staged_root="",
         multiplier=3.0,
         resource_types="leather,meat",
         repak_path="",
