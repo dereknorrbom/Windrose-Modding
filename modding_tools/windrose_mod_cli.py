@@ -327,6 +327,12 @@ def run_cmd_capture(cmd: list[str], cwd: Path | None = None) -> str:
     return completed.stdout
 
 
+def run_shell_command(command: str, cwd: Path | None = None) -> None:
+    completed = subprocess.run(command, cwd=str(cwd) if cwd else None, check=False, shell=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"Shell command failed ({completed.returncode}): {command}")
+
+
 def copy_file(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
@@ -682,6 +688,121 @@ def cmd_build_install(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_multipliers(raw: str) -> list[float]:
+    values: list[float] = []
+    for part in raw.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        value = float(token)
+        if value <= 0:
+            raise ValueError("Multipliers must be > 0.")
+        values.append(value)
+    if not values:
+        raise ValueError("At least one multiplier is required.")
+    return values
+
+
+def multiplier_label(multiplier: float) -> str:
+    if float(int(multiplier)) == float(multiplier):
+        return str(int(multiplier))
+    text = f"{multiplier:.3f}".rstrip("0").rstrip(".")
+    return text.replace(".", "p")
+
+
+def run_prepare_template(template: str, multiplier: float, project_dir: Path) -> None:
+    command = template.format(
+        multiplier=multiplier,
+        multiplier_label=multiplier_label(multiplier),
+        project_dir=str(project_dir),
+    )
+    run_shell_command(command, cwd=workspace_root())
+
+
+def clear_matching_paks(mods_dir: Path, stem_prefix: str) -> int:
+    if not mods_dir.exists():
+        return 0
+    removed = 0
+    for path in mods_dir.glob(f"{stem_prefix}*.pak"):
+        if path.is_file():
+            path.unlink()
+            removed += 1
+    return removed
+
+
+def cmd_build_variants(args: argparse.Namespace) -> int:
+    config_path = Path(args.config)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config not found: {config_path}")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    input_dir = resolve_config_path(config["input_dir"], config_path, "input_dir")
+    output_pak = resolve_config_path(config["output_pak"], config_path, "output_pak")
+    if "mods_dir" in config:
+        mods_dir = resolve_config_path(config["mods_dir"], config_path, "mods_dir")
+    else:
+        mods_dir = DEFAULT_GAME_MODS_DIR
+    if "backup_dir" in config:
+        backup_root = resolve_config_path(config["backup_dir"], config_path, "backup_dir")
+    else:
+        backup_root = output_pak.parent / "mods_backups"
+
+    project_dir = Path(args.project_dir) if args.project_dir else input_dir.parent.parent
+    multipliers = parse_multipliers(args.multipliers)
+    install_multiplier_labels = {multiplier_label(x) for x in parse_multipliers(args.install_multipliers)} if args.install_multipliers else set()
+    mount_point = resolve_config_string(str(config.get("mount_point", "../../../")), config_path, "mount_point")
+    version = resolve_config_string(str(config.get("version", "V11")), config_path, "version")
+    compression = resolve_config_string(str(config.get("compression", "")), config_path, "compression")
+
+    report: dict[str, object] = {
+        "generated_utc": utc_now_iso(),
+        "config": str(config_path),
+        "project_dir": str(project_dir),
+        "multipliers": multipliers,
+        "variants": [],
+    }
+
+    backup_done = False
+    for mult in multipliers:
+        label = multiplier_label(mult)
+        if args.prepare_command_template:
+            run_prepare_template(args.prepare_command_template, mult, project_dir)
+
+        should_install = label in install_multiplier_labels
+        if should_install and args.backup_first and not backup_done:
+            cmd_backup_mods(argparse.Namespace(mods_dir=str(mods_dir), backup_dir=str(backup_root)))
+            backup_done = True
+        if should_install:
+            removed = clear_matching_paks(mods_dir, output_pak.stem)
+            if removed:
+                print(f"Removed {removed} existing variant pak(s) from mods dir")
+
+        variant_output = output_pak.with_name(f"{output_pak.stem}_x{label}{output_pak.suffix}")
+        pack_args = argparse.Namespace(
+            input_dir=str(input_dir),
+            output_pak=str(variant_output),
+            mount_point=mount_point,
+            version=version,
+            compression=compression,
+            install_to_mods=str(mods_dir) if should_install else "",
+            repak_path=args.repak_path or "",
+        )
+        cmd_pack_pak(pack_args)
+        report["variants"].append(
+            {
+                "multiplier": mult,
+                "label": label,
+                "output_pak": str(variant_output),
+                "installed": should_install,
+            }
+        )
+
+    report_path = Path(args.report_path) if args.report_path else (output_pak.parent / "variant_build_report.json")
+    write_json(report_path, report)
+    print(f"Wrote variant build report: {report_path}")
+    return 0
+
+
 def scale_value(value: int, multiplier: float) -> int:
     if value <= 0:
         return 0
@@ -917,6 +1038,47 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_build_install.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_build_install.set_defaults(func=cmd_build_install)
+
+    p_build_variants = sub.add_parser(
+        "build-variants",
+        help="Build multiple multiplier variants from one build config",
+    )
+    p_build_variants.add_argument("--config", required=True, help="Path to build_config.json")
+    p_build_variants.add_argument(
+        "--multipliers",
+        required=True,
+        help="Comma-separated multipliers to build, example: 2,3,5,10",
+    )
+    p_build_variants.add_argument(
+        "--prepare-command-template",
+        default="",
+        help=(
+            "Optional shell command run before each variant build. Supports {multiplier}, "
+            "{multiplier_label}, and {project_dir} placeholders."
+        ),
+    )
+    p_build_variants.add_argument(
+        "--project-dir",
+        default="",
+        help="Optional project directory for prepare template. Defaults to input_dir/../..",
+    )
+    p_build_variants.add_argument(
+        "--install-multipliers",
+        default="",
+        help="Optional comma-separated multipliers to copy into mods_dir after build",
+    )
+    p_build_variants.add_argument(
+        "--backup-first",
+        action="store_true",
+        help="Backup mods folder once before first installed variant",
+    )
+    p_build_variants.add_argument(
+        "--report-path",
+        default="",
+        help="Optional output path for variant build report JSON",
+    )
+    p_build_variants.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
+    p_build_variants.set_defaults(func=cmd_build_variants)
 
     p_prepare_json = sub.add_parser(
         "prepare-boar-hide-json-mod",

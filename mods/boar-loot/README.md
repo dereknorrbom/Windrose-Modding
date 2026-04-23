@@ -14,10 +14,16 @@ Alternative (recommended): use `.local/.env` and let the CLI auto-load it.
 Copy-Item "..\..\.local\.env.example" "..\..\.local\.env"
 ```
 
-## Prepare 3x boar loot overrides (leather + meat)
+## Prepare 3x boar loot overrides (leather + meat + tusk)
 
 ```powershell
-python "..\..\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --project-dir ".\" --multiplier 3.0 --resource-types "leather,meat"
+python "..\..\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --project-dir ".\" --multiplier 3.0 --resource-types "leather,meat,tusk"
+```
+
+## Build multiple variants (2x, 3x, 5x, 10x)
+
+```powershell
+python "..\..\modding_tools\windrose_mod_cli.py" build-variants --config "..\..\.local\boar-loot.build.json" --multipliers "2,3,5,10" --project-dir "." --prepare-command-template "python ..\..\modding_tools\windrose_mod_cli.py prepare-boar-hide-json-mod --project-dir {project_dir} --multiplier {multiplier} --resource-types leather,meat,tusk"
 ```
 
 ## Config source

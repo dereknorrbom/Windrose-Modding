@@ -69,10 +69,16 @@ Initialize a new reusable mod scaffold:
 python ".\modding_tools\windrose_mod_cli.py" init-mod --name "My New Mod"
 ```
 
-Prepare boar resource overrides (example 3x leather + meat):
+Prepare boar resource overrides (example 3x leather + meat + tusk):
 
 ```powershell
-python ".\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --project-dir ".\mods\boar-loot" --multiplier 3.0 --resource-types "leather,meat"
+python ".\modding_tools\windrose_mod_cli.py" prepare-boar-hide-json-mod --project-dir ".\mods\boar-loot" --multiplier 3.0 --resource-types "leather,meat,tusk"
+```
+
+Build repeatable multiplier variants (example 2x, 3x, 5x, 10x):
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" build-variants --config ".\.local\boar-loot.build.json" --multipliers "2,3,5,10" --project-dir ".\mods\boar-loot" --prepare-command-template "python .\modding_tools\windrose_mod_cli.py prepare-boar-hide-json-mod --project-dir {project_dir} --multiplier {multiplier} --resource-types leather,meat,tusk"
 ```
 
 Build + install:

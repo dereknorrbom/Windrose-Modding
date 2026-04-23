@@ -1,13 +1,14 @@
-[size=5][b]Boar Loot x3 (Meat + Hide)[/b][/size]
-[size=3][color=#D4D4D8]Increases boar leather and meat drops by 3x while keeping drop logic and rarity structure intact.[/color][/size]
+[size=5][b]Boar Loot x3 (Meat + Hide + Tusk)[/b][/size]
+[size=3][color=#D4D4D8]Increases boar leather, meat, and tusk drops by 3x while keeping drop logic and rarity structure intact.[/color][/size]
 
 [size=4][b]Description[/b][/size]
-[size=3][color=#D4D4D8]This mod multiplies boar leather and boar meat quantities by 3x across standard, F, and Mega boar loot tables. It is designed for players who want better hunting rewards without changing unrelated systems.[/color][/size]
+[size=3][color=#D4D4D8]This mod multiplies boar leather, boar meat, and boar tusk quantities by 3x across standard, F, and Mega boar loot tables. It is designed for players who want better hunting rewards without changing unrelated systems.[/color][/size]
 
 [size=4][b]What It Changes[/b][/size]
 [list]
 [*]Boar leather drop quantities are multiplied by 3x
 [*]Boar meat drop quantities are multiplied by 3x
+[*]Boar tusk drop quantities are multiplied by 3x
 [*]Zero-value entries remain zero (no forced guaranteed drops)
 [*]No edits to non-boar loot tables
 [/list]
@@ -26,4 +27,4 @@
 [size=3][color=#D4D4D8]Incompatible with other mods that override the same boar loot table assets. Compatible with most mods that do not touch boar RSS loot tables.[/color][/size]
 
 [size=4][b]Version[/b][/size]
-[size=3][color=#D4D4D8]Current preset: 3x leather + meat[/color][/size]
+[size=3][color=#D4D4D8]Supported variants: 2x, 3x, 5x, 10x (leather + meat + tusk).[/color][/size]

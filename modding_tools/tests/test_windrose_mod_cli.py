@@ -35,6 +35,27 @@ def test_parse_resource_types_accepts_csv_and_rejects_invalid():
         cli.parse_resource_types("leather,unknown")
 
 
+def test_parse_multipliers_and_labels():
+    assert cli.parse_multipliers("2,3,5,10") == [2.0, 3.0, 5.0, 10.0]
+    assert cli.multiplier_label(2.0) == "2"
+    assert cli.multiplier_label(2.5) == "2p5"
+    with pytest.raises(ValueError):
+        cli.parse_multipliers("0")
+
+
+def test_clear_matching_paks_removes_only_matching_files(tmp_path: Path):
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir()
+    (mods_dir / "BoarLoot_P.pak").write_bytes(b"x")
+    (mods_dir / "BoarLoot_P_x3.pak").write_bytes(b"x")
+    (mods_dir / "OtherMod.pak").write_bytes(b"x")
+    removed = cli.clear_matching_paks(mods_dir, "BoarLoot_P")
+    assert removed == 2
+    assert not (mods_dir / "BoarLoot_P.pak").exists()
+    assert not (mods_dir / "BoarLoot_P_x3.pak").exists()
+    assert (mods_dir / "OtherMod.pak").exists()
+
+
 def test_slug_and_pak_name_helpers():
     assert cli.slugify_mod_name("Better Boar Loot!!") == "better-boar-loot"
     assert cli.pak_name_from_mod_name("better boar loot") == "BetterBoarLoot"
@@ -202,6 +223,66 @@ def test_cmd_build_install_resolves_config_and_dispatches(tmp_path: Path, monkey
     assert calls["pack"] is not None
     assert "mods_install" in calls["pack"].install_to_mods
     assert calls["pack"].output_pak.endswith("Boar.pak")
+
+
+def test_cmd_build_variants_runs_prepare_pack_and_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(cli, "workspace_root", lambda: repo)
+    monkeypatch.setattr(cli, "repo_root", lambda: repo / "modding_tools")
+    monkeypatch.setenv("WINDROSE_MODS_DIR", str(repo / "mods_install"))
+
+    config = {
+        "input_dir": r"<REPO_ROOT>\mods\boar\input\staged",
+        "output_pak": r"<REPO_ROOT>\mods\boar\output\Boar.pak",
+        "mods_dir": "<WINDROSE_MODS_DIR>",
+        "backup_dir": r"<REPO_ROOT>\mods\boar\output\mods_backups",
+        "mount_point": "../../../",
+        "version": "V11",
+        "compression": "",
+    }
+    cfg_path = repo / "cfg.json"
+    cfg_path.write_text(json.dumps(config), encoding="utf-8")
+
+    prep_calls = []
+    backup_calls = []
+    pack_calls = []
+
+    def fake_prepare(template, multiplier, project_dir):
+        prep_calls.append((template, multiplier, project_dir))
+
+    def fake_backup(ns):
+        backup_calls.append(ns)
+        return 0
+
+    def fake_pack(ns):
+        pack_calls.append(ns)
+        return 0
+
+    monkeypatch.setattr(cli, "run_prepare_template", fake_prepare)
+    monkeypatch.setattr(cli, "cmd_backup_mods", fake_backup)
+    monkeypatch.setattr(cli, "cmd_pack_pak", fake_pack)
+
+    args = argparse.Namespace(
+        config=str(cfg_path),
+        multipliers="2,3,5",
+        prepare_command_template="prepare --mult {multiplier}",
+        project_dir=str(repo / "mods" / "boar"),
+        install_multipliers="5",
+        backup_first=True,
+        report_path="",
+        repak_path="",
+    )
+    assert cli.cmd_build_variants(args) == 0
+    assert len(prep_calls) == 3
+    assert len(pack_calls) == 3
+    assert len(backup_calls) == 1
+    assert pack_calls[0].output_pak.endswith("Boar_x2.pak")
+    assert pack_calls[1].output_pak.endswith("Boar_x3.pak")
+    assert pack_calls[2].output_pak.endswith("Boar_x5.pak")
+    assert pack_calls[2].install_to_mods.endswith("mods_install")
+    report = json.loads((repo / "mods" / "boar" / "output" / "variant_build_report.json").read_text(encoding="utf-8"))
+    assert report["multipliers"] == [2.0, 3.0, 5.0]
 
 
 def test_cmd_prepare_boar_hide_json_mod_requires_aes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
