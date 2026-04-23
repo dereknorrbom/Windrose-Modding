@@ -358,3 +358,62 @@ def test_cmd_prepare_boar_hide_json_mod_writes_scaled_files(tmp_path: Path, monk
     report = json.loads((project_dir / "docs" / "boar_hide_edit_report.json").read_text(encoding="utf-8"))
     assert report["edited_file_count"] == 3
     assert report["resource_types"] == ["leather", "meat"]
+
+
+def test_cmd_prepare_cayenne_pepper_json_mod_scales_pepper_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    paks_dir = tmp_path / "paks"
+    paks_dir.mkdir()
+    (paks_dir / "pakchunk0-Windows.pak").write_bytes(b"pak")
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+
+    payload_main = {
+        "LootData": [
+            {
+                "Min": 1,
+                "Max": 2,
+                "LootItem": "/R5BusinessRules/InventoryItems/Consumables/Food/DA_CID_Food_Raw_Pepper_T01.DA_CID_Food_Raw_Pepper_T01",
+                "LootTable": "None",
+            },
+            {"Min": 1, "Max": 1, "LootItem": "None", "LootTable": "/R5BusinessRules/LootTables/Foliage/Sub_tables/DA_LT_Foliage_Bush_Pepper_Seeds.DA_LT_Foliage_Bush_Pepper_Seeds"},
+        ]
+    }
+    payload_sub = {
+        "LootData": [
+            {
+                "Min": 1,
+                "Max": 2,
+                "LootItem": "/R5BusinessRules/InventoryItems/Consumables/Food/DA_CID_Food_Raw_Pepper_T01.DA_CID_Food_Raw_Pepper_T01",
+                "LootTable": "None",
+            }
+        ]
+    }
+
+    def fake_run_capture(cmd, cwd=None):
+        path = cmd[-1]
+        if path.endswith("DA_LT_Foliage_Bush_Pepper.json"):
+            return json.dumps(payload_main)
+        if path.endswith("DA_LT_Foliage_Bush_Pepper_Pepper.json"):
+            return json.dumps(payload_sub)
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("repak.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture", fake_run_capture)
+
+    project_dir = tmp_path / "mods" / "cayenne-pepper-yield"
+    args = argparse.Namespace(
+        aes_key="0xabc",
+        pak_path="pakchunk0-Windows.pak",
+        project_dir=str(project_dir),
+        staged_root="",
+        multiplier=3.0,
+        repak_path="",
+    )
+    assert cli.cmd_prepare_cayenne_pepper_json_mod(args) == 0
+
+    main_file = project_dir / "input" / "staged" / "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/DA_LT_Foliage_Bush_Pepper.json"
+    data = json.loads(main_file.read_text(encoding="utf-8"))
+    assert data["LootData"][0]["Min"] == 3
+    assert data["LootData"][0]["Max"] == 6
+    # Seed link row should remain unchanged.
+    assert data["LootData"][1]["Min"] == 1
+    assert data["LootData"][1]["Max"] == 1

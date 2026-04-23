@@ -17,6 +17,18 @@ Scaffolded Windrose mod project for `cayenne-pepper-yield`.
 powershell -ExecutionPolicy Bypass -File ".\scripts\build_install.ps1"
 ```
 
+## Prepare cayenne pepper overrides
+
+```powershell
+python "..\..\modding_tools\windrose_mod_cli.py" prepare-cayenne-pepper-json-mod --project-dir ".\" --multiplier 3.0
+```
+
+## Build multiple variants (2x, 3x, 5x, 10x)
+
+```powershell
+python "..\..\modding_tools\windrose_mod_cli.py" build-variants --config "docs\build_config.example.json" --multipliers "2,3,5,10" --project-dir "." --prepare-command-template "python ..\..\modding_tools\windrose_mod_cli.py prepare-cayenne-pepper-json-mod --project-dir {project_dir_quoted} --staged-root {variant_staged_dir_quoted} --multiplier {multiplier}" --install-multipliers "3" --backup-first
+```
+
 ## Backup Mods
 
 ```powershell

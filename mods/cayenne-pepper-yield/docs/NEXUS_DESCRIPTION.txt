@@ -1,0 +1,30 @@
+[size=5][b]Cayenne Bounty - Pepper Yield Variants (2x / 3x / 5x / 10x)[/b][/size]
+[size=3][color=#D4D4D8]More peppers from wild cayenne bushes, with selectable multiplier variants for your server style.[/color][/size]
+
+[size=4][b]Why This Mod Exists[/b][/size]
+[size=3][color=#D4D4D8]In multiplayer, cayenne quickly became a bottleneck for group cooking and progression. This mod keeps the gameplay loop intact while reducing early resource friction for shared worlds.[/color][/size]
+
+[size=4][b]What It Changes[/b][/size]
+[list]
+[*]Scales cayenne pepper quantity from bush loot tables
+[*]Keeps seed and none/drop-chance behavior unchanged
+[*]Does not alter unrelated loot systems
+[/list]
+
+[size=4][b]Available Variants[/b][/size]
+[list]
+[*][b]2x[/b] - Light boost
+[*][b]3x[/b] - Balanced default
+[*][b]5x[/b] - Faster crafting progression
+[*][b]10x[/b] - Abundant low-grind mode
+[/list]
+
+[size=4][b]Install[/b][/size]
+[list=1]
+[*]Choose one variant `.pak`
+[*]Copy to [color=#D4D4D8]Windrose\R5\Content\Paks\~mods[/color]
+[*]Keep only one Cayenne Bounty variant enabled at a time
+[/list]
+
+[size=4][b]Compatibility[/b][/size]
+[size=3][color=#D4D4D8]Incompatible with mods that override the same cayenne bush loot table assets.[/color][/size]
