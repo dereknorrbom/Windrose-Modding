@@ -2,7 +2,7 @@
 [size=3][color=#D4D4D8]Increase wolf and alpha wolf loot quantities while keeping vanilla drop chances intact.[/color][/size]
 
 [size=4][b]What This Mod Does[/b][/size]
-[size=3][color=#D4D4D8]Scales Min/Max quantities for wolf resource loot tables, including meat, leather, fangs, and head drops. Drop chances and weights are left unchanged.[/color][/size]
+[size=3][color=#D4D4D8]Scales Min/Max quantities for meat, leather, fangs, head drops where those drops exist. wolves, alpha wolves are covered. Drop chances and weights are left unchanged.[/color][/size]
 
 [size=4][b]Available Variants[/b][/size]
 [list]

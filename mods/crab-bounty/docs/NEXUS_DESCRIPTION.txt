@@ -2,7 +2,8 @@
 [size=3][color=#D4D4D8]Increase crab, Thorn Fiddler, and drowned crab loot quantities while keeping vanilla drop chances intact.[/color][/size]
 
 [size=4][b]What This Mod Does[/b][/size]
-[size=3][color=#D4D4D8]Scales Min/Max quantities for crab resource loot tables, including crab meat, crab shell, pearls, and undead essence where those drops exist. Thorn Fiddlers appear to use the base crab loot tables, so they are covered by this mod. Drop chances and weights are left unchanged.[/color][/size]
+[size=3][color=#D4D4D8]Scales Min/Max quantities for crab meat, crab shells, pearls, undead essence where those drops exist. crabs, Thorn Fiddlers, drowned crabs are covered. Drop chances and weights are left unchanged.[/color][/size]
+[size=3][color=#D4D4D8]Thorn Fiddlers appear to use the base crab loot tables, so they are covered by the crab entries.[/color][/size]
 
 [size=4][b]Available Variants[/b][/size]
 [list]

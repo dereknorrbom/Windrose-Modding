@@ -69,6 +69,30 @@ Initialize a new reusable mod scaffold:
 python ".\modding_tools\windrose_mod_cli.py" init-mod --name "My New Mod"
 ```
 
+Initialize a mob bounty mod with recipe metadata:
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" init-mob-bounty --name "Goat Bounty" --mob-keywords "goat" --resources "goat meat, leather, bezoar, horns"
+```
+
+Discover mob loot tables before making a mod:
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" discover-mob-loot --keyword "goat"
+```
+
+Build a recipe-driven mod, including variants and zip packages:
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\goat-bounty" --backup-first
+```
+
+Generate the Nexus Mods description from `docs/mod_recipe.json`:
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" generate-nexus-description --project-dir ".\mods\goat-bounty"
+```
+
 Prepare boar resource overrides (example 3x leather + meat + tusk):
 
 ```powershell

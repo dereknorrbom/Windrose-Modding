@@ -14,6 +14,14 @@ Alternative (recommended): use `.local/.env` and let the CLI auto-load it.
 Copy-Item "..\..\.local\.env.example" "..\..\.local\.env"
 ```
 
+## Preferred recipe workflow
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\boar-loot" --backup-first
+```
+
+The recipe lives in `docs/mod_recipe.json` and builds the 2x, 3x, 5x, and 10x variants with zipped release packages.
+
 ## Prepare 3x boar loot overrides (leather + meat + tusk)
 
 ```powershell

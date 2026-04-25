@@ -2,7 +2,7 @@
 [size=3][color=#D4D4D8]Increase goat loot quantities while keeping vanilla drop chances intact.[/color][/size]
 
 [size=4][b]What This Mod Does[/b][/size]
-[size=3][color=#D4D4D8]Scales Min/Max quantities for goat resource loot tables, including meat, leather, bezoar, horns, and elite goat head drops where those drops exist. Female goats, male goats, and mega goats are covered. Drop chances and weights are left unchanged.[/color][/size]
+[size=3][color=#D4D4D8]Scales Min/Max quantities for goat meat, leather, bezoar, horns, elite goat head drops where those drops exist. female goats, male goats, mega goats are covered. Drop chances and weights are left unchanged.[/color][/size]
 
 [size=4][b]Available Variants[/b][/size]
 [list]

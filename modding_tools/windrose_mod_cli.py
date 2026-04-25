@@ -10,10 +10,19 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+
+_MODULE_ROOT = Path(__file__).resolve().parent
+if str(_MODULE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_MODULE_ROOT))
+
+from windrose_cli.nexus import render_nexus_description
+from windrose_cli.packaging import package_pak_variant
+from windrose_cli.recipes import ModRecipe, load_recipe, write_recipe
 
 PATH_PATTERN = re.compile(rb"/Game/[A-Za-z0-9_./]+?(?=/Game/|$)")
 LT_PATTERN = re.compile(rb"(?:/Game)?/R5BusinessRules/LootTables/Mobs/DA_LT_Mob_[A-Za-z0-9_]+")
@@ -853,6 +862,241 @@ def cmd_build_variants(args: argparse.Namespace) -> int:
     return 0
 
 
+def config_candidates_for_project(project_dir: Path, slug: str) -> list[Path]:
+    return [
+        workspace_root() / ".local" / f"{slug}.build.json",
+        project_dir / "docs" / "build_config.local.json",
+        project_dir / "docs" / "build_config.json",
+        project_dir / "docs" / "build_config.example.json",
+    ]
+
+
+def find_project_config(project_dir: Path, slug: str, explicit_config: str = "") -> Path:
+    if explicit_config:
+        path = Path(explicit_config)
+        if not path.exists():
+            raise FileNotFoundError(f"Config not found: {path}")
+        return path
+    for candidate in config_candidates_for_project(project_dir, slug):
+        if candidate.exists():
+            return candidate
+    searched = ", ".join(str(path) for path in config_candidates_for_project(project_dir, slug))
+    raise FileNotFoundError(f"No build config found. Searched: {searched}")
+
+
+def resolve_install_target(target: str, config_mods_dir: Path) -> Path:
+    if target in ("", "custom"):
+        return config_mods_dir
+
+    paks_dir_raw = os.environ.get("WINDROSE_PAKS_DIR", "").strip()
+    paks_dir = Path(paks_dir_raw) if paks_dir_raw else None
+    if target == "single-player":
+        return (paks_dir / "~mods") if paks_dir else config_mods_dir
+    if target == "multiplayer":
+        if not paks_dir:
+            return config_mods_dir
+        windrose_root = paks_dir.parents[2]
+        return windrose_root / "R5" / "Builds" / "WindowsServer" / "R5" / "Content" / "Paks" / "~mods"
+    if target == "dedicated":
+        explicit = os.environ.get("WINDROSE_DEDICATED_PAKS_DIR", "").strip() or os.environ.get(
+            "WINDROSE_DEDICATED_SERVER_PAKS_DIR", ""
+        ).strip()
+        if explicit:
+            return Path(explicit)
+        if not paks_dir:
+            return config_mods_dir
+        windrose_root = paks_dir.parents[2]
+        return windrose_root.parent / "Windrose Dedicated Server" / "R5" / "Content" / "Paks"
+    raise ValueError(f"Unsupported install target: {target}")
+
+
+def prepare_recipe_variant(
+    recipe: ModRecipe,
+    project_dir: Path,
+    variant_staged_dir: Path,
+    multiplier: float,
+    label: str,
+    repak_path: str,
+) -> Path:
+    report_path = project_dir / "docs" / f"{recipe.report_name}_x{label}.json"
+    common = {
+        "aes_key": "",
+        "pak_path": "pakchunk0-Windows.pak",
+        "project_dir": str(project_dir),
+        "staged_root": str(variant_staged_dir),
+        "report_path": str(report_path),
+        "multiplier": multiplier,
+        "repak_path": repak_path or "",
+    }
+    if recipe.workflow == "mob_rss":
+        args = argparse.Namespace(
+            **common,
+            mob_keywords=",".join(recipe.mob_keywords),
+            report_name=recipe.report_name,
+        )
+        cmd_prepare_mob_rss_json_mod(args)
+    elif recipe.workflow == "boar_resources":
+        args = argparse.Namespace(**common, resource_types=",".join(recipe.resource_types))
+        cmd_prepare_boar_hide_json_mod(args)
+    elif recipe.workflow == "cayenne_pepper":
+        args = argparse.Namespace(**common)
+        cmd_prepare_cayenne_pepper_json_mod(args)
+    elif recipe.workflow == "sweet_potato":
+        args = argparse.Namespace(**common)
+        cmd_prepare_sweet_potato_json_mod(args)
+    else:
+        raise ValueError(f"Unsupported recipe workflow: {recipe.workflow}")
+    return report_path
+
+
+def expected_recipe_path_fragments(recipe: ModRecipe) -> list[str]:
+    if recipe.workflow == "mob_rss":
+        return [f"DA_LT_Mob_{keyword}" for keyword in recipe.mob_keywords]
+    if recipe.workflow == "boar_resources":
+        return [f"DA_LT_Mob_Boar", *[resource.capitalize() for resource in recipe.resource_types]]
+    if recipe.workflow == "cayenne_pepper":
+        return ["Pepper"]
+    if recipe.workflow == "sweet_potato":
+        return ["Potato"]
+    return []
+
+
+def validate_variant_outputs(recipe: ModRecipe, variant_staged_dir: Path, generated_root: Path, output_pak: Path) -> dict:
+    staged_resolved = variant_staged_dir.resolve()
+    generated_resolved = generated_root.resolve()
+    if generated_resolved not in staged_resolved.parents:
+        raise ValueError(f"Variant staged dir is not under generated root: {variant_staged_dir}")
+
+    files = [path for path in variant_staged_dir.rglob("*") if path.is_file() and path.name != ".gitkeep"]
+    if not files:
+        raise ValueError(f"No generated files found for variant: {variant_staged_dir}")
+
+    fragments = [fragment.lower() for fragment in expected_recipe_path_fragments(recipe)]
+    matched_files = []
+    unrelated_mob_files = []
+    for path in files:
+        text = path.as_posix().lower()
+        if any(fragment.lower() in text for fragment in fragments):
+            matched_files.append(str(path))
+        if recipe.workflow == "mob_rss" and "/loottables/mobs/rss/da_lt_mob_" in text:
+            if not any(keyword.lower() in text for keyword in recipe.mob_keywords):
+                unrelated_mob_files.append(str(path))
+
+    if not matched_files:
+        raise ValueError(f"Generated files did not match recipe expectations for {recipe.display_name}.")
+    if unrelated_mob_files:
+        raise ValueError(f"Generated output includes unrelated mob loot tables: {unrelated_mob_files}")
+
+    pak_size = output_pak.stat().st_size if output_pak.exists() else 0
+    if output_pak.exists() and pak_size <= 0:
+        raise ValueError(f"Output pak is empty: {output_pak}")
+
+    return {
+        "staged_file_count": len(files),
+        "matched_file_count": len(matched_files),
+        "pak_size": pak_size,
+    }
+
+
+def cmd_build_mod(args: argparse.Namespace) -> int:
+    project_dir = Path(args.project_dir)
+    recipe = load_recipe(project_dir)
+    config_path = find_project_config(project_dir, recipe.slug, args.config)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    input_dir = resolve_config_path(config["input_dir"], config_path, "input_dir")
+    output_pak = resolve_config_path(config["output_pak"], config_path, "output_pak")
+    config_mods_dir = resolve_config_path(config.get("mods_dir", str(DEFAULT_GAME_MODS_DIR)), config_path, "mods_dir")
+    backup_root = resolve_config_path(
+        config.get("backup_dir", str(output_pak.parent / "mods_backups")),
+        config_path,
+        "backup_dir",
+    )
+    mount_point = resolve_config_string(str(config.get("mount_point", "../../../")), config_path, "mount_point")
+    version = resolve_config_string(str(config.get("version", "V11")), config_path, "version")
+    compression = resolve_config_string(str(config.get("compression", "")), config_path, "compression")
+    generated_root = output_pak.parent / "generated"
+    install_target = args.install_target or recipe.install_target
+    mods_dir = resolve_install_target(install_target, config_mods_dir)
+
+    if args.install_multipliers:
+        install_labels = {multiplier_label(x) for x in parse_multipliers(args.install_multipliers)}
+    elif recipe.default_install_variant:
+        install_labels = {multiplier_label(recipe.default_install_variant)}
+    else:
+        install_labels = set()
+
+    report: dict[str, object] = {
+        "generated_utc": utc_now_iso(),
+        "recipe": str(project_dir / "docs" / "mod_recipe.json"),
+        "config": str(config_path),
+        "project_dir": str(project_dir),
+        "install_target": install_target,
+        "mods_dir": str(mods_dir),
+        "generated_root": str(generated_root),
+        "multipliers": recipe.variants,
+        "variants": [],
+    }
+
+    backup_done = False
+    for mult in recipe.variants:
+        label = multiplier_label(mult)
+        variant_staged_dir = generated_root / f"x{label}" / "staged"
+        if variant_staged_dir.exists():
+            shutil.rmtree(variant_staged_dir)
+        shutil.copytree(input_dir, variant_staged_dir)
+
+        variant_output = output_pak.with_name(f"{output_pak.stem}_x{label}{output_pak.suffix}")
+        edit_report = prepare_recipe_variant(recipe, project_dir, variant_staged_dir, mult, label, args.repak_path)
+
+        should_install = label in install_labels
+        if should_install and args.backup_first and not backup_done:
+            cmd_backup_mods(argparse.Namespace(mods_dir=str(mods_dir), backup_dir=str(backup_root)))
+            backup_done = True
+        if should_install:
+            removed = clear_matching_paks(mods_dir, output_pak.stem)
+            if removed:
+                print(f"Removed {removed} existing variant pak(s) from mods dir")
+
+        cmd_pack_pak(
+            argparse.Namespace(
+                input_dir=str(variant_staged_dir),
+                output_pak=str(variant_output),
+                mount_point=mount_point,
+                version=version,
+                compression=compression,
+                install_to_mods=str(mods_dir) if should_install else "",
+                repak_path=args.repak_path or "",
+            )
+        )
+
+        validation = {}
+        if recipe.validate_outputs and not args.no_validate:
+            validation = validate_variant_outputs(recipe, variant_staged_dir, generated_root, variant_output)
+
+        package_path = ""
+        if recipe.package_variants and not args.no_package:
+            package_path = str(package_pak_variant(variant_output))
+
+        report["variants"].append(
+            {
+                "multiplier": mult,
+                "label": label,
+                "variant_staged_dir": str(variant_staged_dir),
+                "output_pak": str(variant_output),
+                "package": package_path,
+                "edit_report": str(edit_report),
+                "installed": should_install,
+                "validation": validation,
+            }
+        )
+
+    report_path = output_pak.parent / "variant_build_report.json"
+    write_json(report_path, report)
+    print(f"Wrote variant build report: {report_path}")
+    return 0
+
+
 def scale_value(value: int, multiplier: float) -> int:
     if value <= 0:
         return 0
@@ -894,7 +1138,11 @@ def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
             pak_path = (Path.cwd() / pak_path_input).resolve()
     project_dir = Path(args.project_dir)
     staged_root = Path(args.staged_root) if args.staged_root else (project_dir / "input" / "staged")
-    report_path = project_dir / "docs" / "boar_hide_edit_report.json"
+    report_path = (
+        Path(args.report_path)
+        if getattr(args, "report_path", "")
+        else (project_dir / "docs" / "boar_hide_edit_report.json")
+    )
 
     if not pak_path.exists():
         raise FileNotFoundError(f"Pak not found: {pak_path}")
@@ -1069,7 +1317,11 @@ def cmd_prepare_cayenne_pepper_json_mod(args: argparse.Namespace) -> int:
             pak_path = (Path.cwd() / pak_path_input).resolve()
     project_dir = Path(args.project_dir)
     staged_root = Path(args.staged_root) if args.staged_root else (project_dir / "input" / "staged")
-    report_path = project_dir / "docs" / "cayenne_pepper_edit_report.json"
+    report_path = (
+        Path(args.report_path)
+        if getattr(args, "report_path", "")
+        else (project_dir / "docs" / "cayenne_pepper_edit_report.json")
+    )
 
     if not pak_path.exists():
         raise FileNotFoundError(f"Pak not found: {pak_path}")
@@ -1144,7 +1396,11 @@ def cmd_prepare_sweet_potato_json_mod(args: argparse.Namespace) -> int:
             pak_path = (Path.cwd() / pak_path_input).resolve()
     project_dir = Path(args.project_dir)
     staged_root = Path(args.staged_root) if args.staged_root else (project_dir / "input" / "staged")
-    report_path = project_dir / "docs" / "sweet_potato_edit_report.json"
+    report_path = (
+        Path(args.report_path)
+        if getattr(args, "report_path", "")
+        else (project_dir / "docs" / "sweet_potato_edit_report.json")
+    )
 
     if not pak_path.exists():
         raise FileNotFoundError(f"Pak not found: {pak_path}")
@@ -1198,6 +1454,176 @@ def cmd_prepare_sweet_potato_json_mod(args: argparse.Namespace) -> int:
     return 0
 
 
+def resolve_pak_path(raw_path: str) -> Path:
+    pak_path_input = Path(raw_path)
+    if pak_path_input.is_absolute():
+        return pak_path_input
+    paks_dir_env = os.environ.get("WINDROSE_PAKS_DIR", "").strip()
+    if paks_dir_env:
+        return Path(paks_dir_env) / pak_path_input
+    return (Path.cwd() / pak_path_input).resolve()
+
+
+def summarize_loot_json(data: dict) -> list[dict[str, object]]:
+    rows = []
+    for item in data.get("LootData", []):
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            {
+                "min": item.get("Min"),
+                "max": item.get("Max"),
+                "weight": item.get("Weight"),
+                "loot_item": item.get("LootItem"),
+                "loot_table": item.get("LootTable"),
+            }
+        )
+    return rows
+
+
+def discover_mob_loot_payload(args: argparse.Namespace) -> dict:
+    repak = resolve_tool("repak.exe", args.repak_path)
+    aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "").strip()
+    if not aes_key:
+        raise ValueError("AES key is required. Pass --aes-key or set WINDROSE_AES_KEY.")
+
+    keywords = parse_keywords(args.keyword)
+    pak_path = resolve_pak_path(args.pak_path)
+    if not pak_path.exists():
+        raise FileNotFoundError(f"Pak not found: {pak_path}")
+
+    list_out = run_cmd_capture([str(repak), "--aes-key", aes_key, "list", str(pak_path)])
+    final_tables = []
+    rss_tables = []
+    for raw_line in list_out.splitlines():
+        path = raw_line.strip()
+        lower = path.lower()
+        if not path.endswith(".json") or "/LootTables/Mobs/" not in path:
+            continue
+        if not any(keyword in lower for keyword in keywords):
+            continue
+        if "/LootTables/Mobs/Rss/" in path:
+            rss_tables.append(path)
+        else:
+            final_tables.append(path)
+
+    rss_details = []
+    for path in sorted(set(rss_tables)):
+        data = json.loads(run_cmd_capture([str(repak), "--aes-key", aes_key, "get", str(pak_path), path]))
+        rss_details.append({"path": path, "rows": summarize_loot_json(data)})
+
+    payload = {
+        "generated_utc": utc_now_iso(),
+        "pak_path": str(pak_path),
+        "keywords": sorted(keywords),
+        "final_tables": sorted(set(final_tables)),
+        "rss_tables": rss_details,
+    }
+    if not final_tables and not rss_tables:
+        raise RuntimeError("No matching mob loot JSON entries found in pak.")
+    return payload
+
+
+def cmd_discover_mob_loot(args: argparse.Namespace) -> int:
+    payload = discover_mob_loot_payload(args)
+    if args.output:
+        write_json(Path(args.output), payload)
+        print(f"Wrote mob loot discovery: {args.output}")
+    else:
+        print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_generate_nexus_description(args: argparse.Namespace) -> int:
+    project_dir = Path(args.project_dir)
+    recipe = load_recipe(project_dir)
+    output_path = Path(args.output) if args.output else project_dir / "docs" / "NEXUS_DESCRIPTION.txt"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_nexus_description(recipe), encoding="utf-8")
+    print(f"Wrote Nexus description: {output_path}")
+    return 0
+
+
+def mob_bounty_recipe_dict(
+    name: str,
+    slug: str,
+    pak_name: str,
+    mob_keywords: str,
+    resources: str,
+) -> dict:
+    resource_list = [part.strip() for part in resources.split(",") if part.strip()]
+    keyword_list = [part.strip() for part in mob_keywords.split(",") if part.strip()]
+    return {
+        "display_name": name,
+        "slug": slug,
+        "pak_name": pak_name,
+        "workflow": "mob_rss",
+        "mob_keywords": keyword_list,
+        "report_name": f"{slug.replace('-', '_')}_loot_edit_report",
+        "variants": [2, 3, 5, 10],
+        "default_install_variant": 3,
+        "install_target": "custom",
+        "package_variants": True,
+        "validate_outputs": True,
+        "nexus": {
+            "summary": f"Increase {name.replace(' Bounty', '').lower()} loot quantities while keeping vanilla drop chances intact.",
+            "resources": resource_list,
+            "covered": [keyword for keyword in keyword_list],
+        },
+    }
+
+
+def cmd_init_mob_bounty(args: argparse.Namespace) -> int:
+    name = args.name.strip()
+    slug = args.slug.strip() if args.slug else slugify_mod_name(name)
+    pak_name = pak_name_from_mod_name(name)
+    init_args = argparse.Namespace(
+        name=name,
+        slug=slug,
+        mods_root=args.mods_root,
+        force=args.force,
+    )
+    cmd_init_mod(init_args)
+
+    project_dir = Path(args.mods_root) / slug
+    recipe = mob_bounty_recipe_dict(name, slug, pak_name, args.mob_keywords, args.resources)
+    write_recipe(project_dir / "docs" / "mod_recipe.json", recipe)
+
+    parsed = load_recipe(project_dir)
+    (project_dir / "docs" / "NEXUS_DESCRIPTION.txt").write_text(
+        render_nexus_description(parsed),
+        encoding="utf-8",
+    )
+
+    readme_path = project_dir / "README.md"
+    readme_path.write_text(
+        "\n".join(
+            [
+                f"# {name}",
+                "",
+                f"Scaffolded Windrose mob bounty mod for `{slug}`.",
+                "",
+                "## Build all variants",
+                "",
+                "```powershell",
+                f'python ".\\modding_tools\\windrose_mod_cli.py" build-mod --project-dir ".\\mods\\{slug}" --backup-first',
+                "```",
+                "",
+                "## Discover matching loot tables",
+                "",
+                "```powershell",
+                f'python ".\\modding_tools\\windrose_mod_cli.py" discover-mob-loot --keyword "{args.mob_keywords}"',
+                "```",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    print(f"Initialized mob bounty recipe at: {project_dir}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Windrose reusable modding CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1220,6 +1646,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow writing into an existing non-empty target directory",
     )
     p_init_mod.set_defaults(func=cmd_init_mod)
+
+    p_init_mob_bounty = sub.add_parser("init-mob-bounty", help="Create a mob bounty mod with recipe metadata")
+    p_init_mob_bounty.add_argument("--name", required=True, help="Mod display name, example: Goat Bounty")
+    p_init_mob_bounty.add_argument("--mob-keywords", required=True, help="Comma-separated mob keywords")
+    p_init_mob_bounty.add_argument("--resources", required=True, help="Comma-separated resource description")
+    p_init_mob_bounty.add_argument("--slug", default="", help="Optional folder slug")
+    p_init_mob_bounty.add_argument(
+        "--mods-root",
+        default=str(workspace_root() / "mods"),
+        help="Directory containing all mod folders",
+    )
+    p_init_mob_bounty.add_argument("--force", action="store_true", help="Allow existing target directory")
+    p_init_mob_bounty.set_defaults(func=cmd_init_mob_bounty)
 
     p_search = sub.add_parser("search-paths", help="Search Unreal object paths by substrings")
     p_search.add_argument("--paks-dir", required=True, help="Path containing .ucas files")
@@ -1250,6 +1689,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_manifest.add_argument("--mob-keyword", required=True, help="Example: Boar, Wolf, Goat")
     p_manifest.add_argument("--output", required=True, help="Output JSON path")
     p_manifest.set_defaults(func=cmd_loot_manifest)
+
+    p_discover_mob_loot = sub.add_parser(
+        "discover-mob-loot",
+        help="Show final and RSS mob loot JSON tables plus vanilla rows",
+    )
+    p_discover_mob_loot.add_argument("--keyword", required=True, help="Mob keyword or CSV, example: goat")
+    p_discover_mob_loot.add_argument(
+        "--aes-key",
+        default="",
+        help="AES key (hex or base64). Optional if WINDROSE_AES_KEY is set.",
+    )
+    p_discover_mob_loot.add_argument(
+        "--pak-path",
+        default="pakchunk0-Windows.pak",
+        help="Pak file containing mob loot JSON entries. If relative, resolves via WINDROSE_PAKS_DIR.",
+    )
+    p_discover_mob_loot.add_argument("--output", default="", help="Optional output JSON path")
+    p_discover_mob_loot.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
+    p_discover_mob_loot.set_defaults(func=cmd_discover_mob_loot)
 
     p_tools = sub.add_parser("tools-info", help="Show installed toolkit executable paths")
     p_tools.set_defaults(func=cmd_tools_info)
@@ -1380,6 +1838,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_build_variants.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_build_variants.set_defaults(func=cmd_build_variants)
 
+    p_build_mod = sub.add_parser("build-mod", help="Build a mod from docs/mod_recipe.json")
+    p_build_mod.add_argument("--project-dir", required=True, help="Mod project directory")
+    p_build_mod.add_argument("--config", default="", help="Optional explicit build config path")
+    p_build_mod.add_argument(
+        "--install-multipliers",
+        default="",
+        help="Optional comma-separated multipliers to install; defaults to recipe default_install_variant",
+    )
+    p_build_mod.add_argument(
+        "--install-target",
+        default="",
+        choices=["", "single-player", "multiplayer", "dedicated", "custom"],
+        help="Override recipe install target",
+    )
+    p_build_mod.add_argument("--backup-first", action="store_true", help="Backup mods folder before installing")
+    p_build_mod.add_argument("--no-package", action="store_true", help="Do not create variant zip files")
+    p_build_mod.add_argument("--no-validate", action="store_true", help="Skip generated output validation")
+    p_build_mod.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
+    p_build_mod.set_defaults(func=cmd_build_mod)
+
+    p_nexus = sub.add_parser(
+        "generate-nexus-description",
+        help="Generate docs/NEXUS_DESCRIPTION.txt from mod_recipe.json",
+    )
+    p_nexus.add_argument("--project-dir", required=True, help="Mod project directory")
+    p_nexus.add_argument("--output", default="", help="Optional output path")
+    p_nexus.set_defaults(func=cmd_generate_nexus_description)
+
     p_prepare_json = sub.add_parser(
         "prepare-boar-hide-json-mod",
         help="Extract boar leather JSON loot tables from pak and scale Min/Max values",
@@ -1414,6 +1900,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--resource-types",
         default="leather",
         help="Comma-separated boar resources to scale: leather, meat, fat, tusk, boarhead",
+    )
+    p_prepare_json.add_argument(
+        "--report-path",
+        default="",
+        help="Optional explicit report path.",
     )
     p_prepare_json.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_prepare_json.set_defaults(func=cmd_prepare_boar_hide_json_mod)
@@ -1496,6 +1987,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=2.0,
         help="Scale factor for Min/Max pepper quantities (default: 2.0)",
     )
+    p_prepare_cayenne.add_argument("--report-path", default="", help="Optional explicit report path.")
     p_prepare_cayenne.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_prepare_cayenne.set_defaults(func=cmd_prepare_cayenne_pepper_json_mod)
 
@@ -1529,6 +2021,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=2.0,
         help="Scale factor for Min/Max sweet potato quantities (default: 2.0)",
     )
+    p_prepare_sweet_potato.add_argument("--report-path", default="", help="Optional explicit report path.")
     p_prepare_sweet_potato.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_prepare_sweet_potato.set_defaults(func=cmd_prepare_sweet_potato_json_mod)
 

@@ -512,3 +512,214 @@ def test_cmd_prepare_sweet_potato_json_mod_scales_potato_only(tmp_path: Path, mo
     assert data["LootData"][0]["Max"] == 9
     assert data["LootData"][1]["Min"] == 1
     assert data["LootData"][1]["Max"] == 1
+
+
+def test_load_recipe_validates_mob_keywords(tmp_path: Path):
+    project = tmp_path / "mods" / "goat-bounty"
+    docs = project / "docs"
+    docs.mkdir(parents=True)
+    (docs / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Goat Bounty",
+                "slug": "goat-bounty",
+                "pak_name": "GoatBounty",
+                "workflow": "mob_rss",
+                "report_name": "goat_loot_edit_report",
+                "variants": [2, 3],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        cli.load_recipe(project)
+
+
+def test_cmd_build_mod_uses_recipe_packages_and_variant_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo = tmp_path / "repo"
+    project = repo / "mods" / "goat-bounty"
+    staged = project / "input" / "staged"
+    staged.mkdir(parents=True)
+    (staged / ".gitkeep").write_text("", encoding="utf-8")
+    (project / "docs").mkdir(parents=True)
+    monkeypatch.setattr(cli, "workspace_root", lambda: repo)
+    monkeypatch.setattr(cli, "repo_root", lambda: repo / "modding_tools")
+    monkeypatch.setenv("WINDROSE_MODS_DIR", str(repo / "mods_install"))
+
+    (project / "docs" / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Goat Bounty",
+                "slug": "goat-bounty",
+                "pak_name": "GoatBounty",
+                "workflow": "mob_rss",
+                "mob_keywords": ["goat"],
+                "report_name": "goat_loot_edit_report",
+                "variants": [2, 3],
+                "default_install_variant": 3,
+                "install_target": "custom",
+                "package_variants": True,
+                "validate_outputs": True,
+                "nexus": {"summary": "Goats", "resources": ["goat drops"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (project / "docs" / "build_config.example.json").write_text(
+        json.dumps(
+            {
+                "input_dir": r"<REPO_ROOT>\mods\goat-bounty\input\staged",
+                "output_pak": r"<REPO_ROOT>\mods\goat-bounty\output\GoatBounty_P.pak",
+                "mods_dir": "<WINDROSE_MODS_DIR>",
+                "backup_dir": r"<REPO_ROOT>\mods\goat-bounty\output\mods_backups",
+                "mount_point": "../../../",
+                "version": "V11",
+                "compression": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    pack_calls = []
+    backup_calls = []
+
+    def fake_prepare(recipe, project_dir, variant_staged_dir, multiplier, label, repak_path):
+        out = variant_staged_dir / "R5" / "Plugins" / "R5BusinessRules" / "Content" / "LootTables" / "Mobs" / "Rss" / "DA_LT_Mob_GoatF_Meat.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"LootData": [{"Min": multiplier, "Max": multiplier}]}), encoding="utf-8")
+        report = project_dir / "docs" / f"{recipe.report_name}_x{label}.json"
+        report.write_text(json.dumps({"multiplier": multiplier}), encoding="utf-8")
+        return report
+
+    def fake_pack(ns):
+        pack_calls.append(ns)
+        output = Path(ns.output_pak)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"pak")
+        if ns.install_to_mods:
+            target = Path(ns.install_to_mods) / output.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"pak")
+        return 0
+
+    def fake_backup(ns):
+        backup_calls.append(ns)
+        return 0
+
+    monkeypatch.setattr(cli, "prepare_recipe_variant", fake_prepare)
+    monkeypatch.setattr(cli, "cmd_pack_pak", fake_pack)
+    monkeypatch.setattr(cli, "cmd_backup_mods", fake_backup)
+
+    args = argparse.Namespace(
+        project_dir=str(project),
+        config="",
+        install_multipliers="",
+        install_target="",
+        backup_first=True,
+        no_package=False,
+        no_validate=False,
+        repak_path="",
+    )
+    assert cli.cmd_build_mod(args) == 0
+    assert len(pack_calls) == 2
+    assert len(backup_calls) == 1
+    assert (project / "output" / "GoatBounty_P_x2.zip").exists()
+    assert (project / "output" / "GoatBounty_P_x3.zip").exists()
+    assert (project / "docs" / "goat_loot_edit_report_x2.json").exists()
+    report = json.loads((project / "output" / "variant_build_report.json").read_text(encoding="utf-8"))
+    assert report["variants"][1]["installed"] is True
+    assert report["variants"][0]["package"].endswith("GoatBounty_P_x2.zip")
+
+
+def test_cmd_discover_mob_loot_reports_final_and_rss_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    paks_dir = tmp_path / "paks"
+    paks_dir.mkdir()
+    (paks_dir / "pakchunk0-Windows.pak").write_bytes(b"pak")
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+    paths = [
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/DA_LT_Mob_GoatF_Final.json",
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_GoatF_Meat.json",
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar_Meat.json",
+    ]
+
+    def fake_run_capture(cmd, cwd=None):
+        if "list" in cmd:
+            return "\n".join(paths)
+        if "get" in cmd:
+            return json.dumps({"LootData": [{"Min": 1, "Max": 2, "Weight": 100, "LootItem": "X", "LootTable": "None"}]})
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("repak.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture", fake_run_capture)
+    output = tmp_path / "goat_discovery.json"
+    args = argparse.Namespace(
+        keyword="goat",
+        aes_key="0xabc",
+        pak_path="pakchunk0-Windows.pak",
+        output=str(output),
+        repak_path="",
+    )
+    assert cli.cmd_discover_mob_loot(args) == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["final_tables"] == [paths[0]]
+    assert payload["rss_tables"][0]["rows"][0]["min"] == 1
+
+
+def test_generate_nexus_description_from_recipe(tmp_path: Path):
+    project = tmp_path / "mods" / "goat-bounty"
+    (project / "docs").mkdir(parents=True)
+    (project / "docs" / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Goat Bounty",
+                "slug": "goat-bounty",
+                "pak_name": "GoatBounty",
+                "workflow": "mob_rss",
+                "mob_keywords": ["goat"],
+                "report_name": "goat_loot_edit_report",
+                "variants": [2, 3, 5, 10],
+                "nexus": {"summary": "Increase goats.", "resources": ["goat meat"], "covered": ["goats"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(project_dir=str(project), output="")
+    assert cli.cmd_generate_nexus_description(args) == 0
+    text = (project / "docs" / "NEXUS_DESCRIPTION.txt").read_text(encoding="utf-8")
+    assert "Goat Bounty - Loot Variants" in text
+    assert "Single-player" in text
+
+
+def test_cmd_init_mob_bounty_scaffolds_recipe_and_docs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = tmp_path / "repo"
+    template = workspace / "mods" / "new-mod-template"
+    (template / "docs").mkdir(parents=True)
+    (template / "input" / "staged").mkdir(parents=True)
+    (template / "output").mkdir(parents=True)
+    (template / "README.md").write_text("# __MOD_NAME__", encoding="utf-8")
+    (template / "docs" / "build_config.example.json").write_text(
+        json.dumps(
+            {
+                "name": "__MOD_PAK_NAME__",
+                "input_dir": "<REPO_ROOT>\\mods\\__MOD_SLUG__\\input\\staged",
+                "output_pak": "<REPO_ROOT>\\mods\\__MOD_SLUG__\\output\\__MOD_PAK_NAME___P.pak",
+                "mods_dir": "<WINDROSE_MODS_DIR>",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "workspace_root", lambda: workspace)
+    args = argparse.Namespace(
+        name="Goat Bounty",
+        mob_keywords="goat",
+        resources="goat meat, leather",
+        slug="",
+        mods_root=str(workspace / "mods"),
+        force=False,
+    )
+    assert cli.cmd_init_mob_bounty(args) == 0
+    project = workspace / "mods" / "goat-bounty"
+    recipe = json.loads((project / "docs" / "mod_recipe.json").read_text(encoding="utf-8"))
+    assert recipe["workflow"] == "mob_rss"
+    assert recipe["mob_keywords"] == ["goat"]
+    assert (project / "docs" / "NEXUS_DESCRIPTION.txt").exists()

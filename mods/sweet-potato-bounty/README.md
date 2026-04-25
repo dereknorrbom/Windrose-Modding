@@ -17,6 +17,14 @@ Scaffolded Windrose mod project for `sweet-potato-bounty`.
 powershell -ExecutionPolicy Bypass -File ".\scripts\build_install.ps1"
 ```
 
+## Preferred recipe workflow
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\sweet-potato-bounty" --backup-first
+```
+
+The recipe lives in `docs/mod_recipe.json` and builds the 2x, 3x, 5x, and 10x variants with zipped release packages.
+
 ## Prepare sweet potato overrides
 
 ```powershell
