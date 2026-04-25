@@ -34,9 +34,18 @@
 [size=4][b]Install[/b][/size]
 [list=1]
 [*]Choose one variant (`2x`, `3x`, `5x`, or `10x`)
-[*]Copy the selected `.pak` to [color=#D4D4D8]Windrose\R5\Content\Paks\~mods[/color]
+[*]Install it to the correct folder for how you are playing
 [*]Launch the game
 [/list]
+
+[size=4][b]Install Paths[/b][/size]
+[list]
+[*][b]Single-player:[/b] [color=#D4D4D8]Windrose\R5\Content\Paks\~mods[/color]
+[*][b]Multiplayer:[/b] [color=#D4D4D8]Windrose\R5\Builds\WindowsServer\R5\Content\Paks\~mods[/color]
+[*][b]Dedicated Server:[/b] [color=#D4D4D8]Windrose Dedicated Server\R5\Content\Paks[/color]
+[/list]
+
+[size=3][color=#D4D4D8]For dedicated servers, you can place the `.pak` directly in the listed folder without creating a `~mods` folder.[/color][/size]
 
 [size=4][b]Compatibility[/b][/size]
 [size=3][color=#D4D4D8]Incompatible with other mods that override the same boar loot table assets.[/color][/size]

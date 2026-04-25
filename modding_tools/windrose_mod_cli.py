@@ -32,6 +32,11 @@ CAYENNE_PEPPER_PATHS = [
     "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/DA_LT_Foliage_Bush_Pepper.json",
     "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/Sub_tables/DA_LT_Foliage_Bush_Pepper_Pepper.json",
 ]
+SWEET_POTATO_PATHS = [
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/DA_LT_Foliage_Potato.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/Sub_tables/DA_LT_Foliage_Potato_Potato.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Crop/DA_LT_Foliage_Crop_Potato.json",
+]
 MOB_RSS_JSON_PATTERN = re.compile(
     r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_(?P<mob>[A-Za-z0-9]+)_(?P<resource>[A-Za-z0-9]+)(?:_[0-9]+)?\.json$"
 )
@@ -1122,6 +1127,77 @@ def cmd_prepare_cayenne_pepper_json_mod(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prepare_sweet_potato_json_mod(args: argparse.Namespace) -> int:
+    repak = resolve_tool("repak.exe", args.repak_path)
+    aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "").strip()
+    if not aes_key:
+        raise ValueError("AES key is required. Pass --aes-key or set WINDROSE_AES_KEY.")
+
+    pak_path_input = Path(args.pak_path)
+    if pak_path_input.is_absolute():
+        pak_path = pak_path_input
+    else:
+        paks_dir_env = os.environ.get("WINDROSE_PAKS_DIR", "").strip()
+        if paks_dir_env:
+            pak_path = Path(paks_dir_env) / pak_path_input
+        else:
+            pak_path = (Path.cwd() / pak_path_input).resolve()
+    project_dir = Path(args.project_dir)
+    staged_root = Path(args.staged_root) if args.staged_root else (project_dir / "input" / "staged")
+    report_path = project_dir / "docs" / "sweet_potato_edit_report.json"
+
+    if not pak_path.exists():
+        raise FileNotFoundError(f"Pak not found: {pak_path}")
+    staged_root.mkdir(parents=True, exist_ok=True)
+
+    edited = []
+    for path in SWEET_POTATO_PATHS:
+        raw = run_cmd_capture([str(repak), "--aes-key", aes_key, "get", str(pak_path), path])
+        data = json.loads(raw)
+        file_edits = []
+        for item in data.get("LootData", []):
+            if not isinstance(item, dict):
+                continue
+            if "Min" not in item or "Max" not in item:
+                continue
+            loot_item = str(item.get("LootItem", ""))
+            is_potato_entry = "DA_DID_Resource_Potato_T01" in loot_item
+            if not is_potato_entry:
+                continue
+            old_min = int(item["Min"])
+            old_max = int(item["Max"])
+            new_min = scale_value(old_min, args.multiplier)
+            new_max = scale_value(old_max, args.multiplier)
+            item["Min"] = new_min
+            item["Max"] = new_max
+            file_edits.append(
+                {
+                    "old_min": old_min,
+                    "old_max": old_max,
+                    "new_min": new_min,
+                    "new_max": new_max,
+                }
+            )
+
+        out_file = staged_root / Path(path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        edited.append({"path": path, "output_file": str(out_file), "edits": file_edits})
+
+    report = {
+        "generated_utc": utc_now_iso(),
+        "pak_path": str(pak_path),
+        "multiplier": args.multiplier,
+        "edited_file_count": len(edited),
+        "edited_files": edited,
+        "notes": ["Sweet potato quantity scaled. Seed and none entries remain unchanged."],
+    }
+    write_json(report_path, report)
+    print(f"Prepared sweet potato JSON overrides in: {staged_root}")
+    print(f"Wrote report: {report_path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Windrose reusable modding CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1422,6 +1498,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_prepare_cayenne.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_prepare_cayenne.set_defaults(func=cmd_prepare_cayenne_pepper_json_mod)
+
+    p_prepare_sweet_potato = sub.add_parser(
+        "prepare-sweet-potato-json-mod",
+        help="Extract sweet potato foliage/crop loot JSON tables from pak and scale potato quantities",
+    )
+    p_prepare_sweet_potato.add_argument(
+        "--aes-key",
+        default="",
+        help="AES key (hex or base64). Optional if WINDROSE_AES_KEY is set.",
+    )
+    p_prepare_sweet_potato.add_argument(
+        "--pak-path",
+        default="pakchunk0-Windows.pak",
+        help="Pak file containing sweet potato loot JSON entries. If relative, resolves via WINDROSE_PAKS_DIR.",
+    )
+    p_prepare_sweet_potato.add_argument(
+        "--project-dir",
+        default=str(workspace_root() / "mods" / "sweet-potato-bounty"),
+        help="Mod project directory root",
+    )
+    p_prepare_sweet_potato.add_argument(
+        "--staged-root",
+        default="",
+        help="Optional explicit staged output root. Defaults to <project_dir>/input/staged",
+    )
+    p_prepare_sweet_potato.add_argument(
+        "--multiplier",
+        type=float,
+        default=2.0,
+        help="Scale factor for Min/Max sweet potato quantities (default: 2.0)",
+    )
+    p_prepare_sweet_potato.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
+    p_prepare_sweet_potato.set_defaults(func=cmd_prepare_sweet_potato_json_mod)
 
     return parser
 

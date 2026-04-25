@@ -462,3 +462,53 @@ def test_cmd_prepare_mob_rss_json_mod_filters_and_scales(tmp_path: Path, monkeyp
     assert data["LootData"][0]["Max"] == 6
     boar_file = project_dir / "input" / "staged" / "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar_Leather.json"
     assert not boar_file.exists()
+
+
+def test_cmd_prepare_sweet_potato_json_mod_scales_potato_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    paks_dir = tmp_path / "paks"
+    paks_dir.mkdir()
+    (paks_dir / "pakchunk0-Windows.pak").write_bytes(b"pak")
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+
+    payload = {
+        "LootData": [
+            {
+                "Min": 2,
+                "Max": 3,
+                "LootItem": "/R5BusinessRules/InventoryItems/DefaultItems/Resource/DA_DID_Resource_Potato_T01.DA_DID_Resource_Potato_T01",
+                "LootTable": "None",
+            },
+            {
+                "Min": 1,
+                "Max": 1,
+                "LootItem": "/R5BusinessRules/InventoryItems/DefaultItems/Resource/DA_DID_Resource_PotatoSeeds_T01.DA_DID_Resource_PotatoSeeds_T01",
+                "LootTable": "None",
+            },
+        ]
+    }
+
+    def fake_run_capture(cmd, cwd=None):
+        if "get" in cmd:
+            return json.dumps(payload)
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("repak.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture", fake_run_capture)
+
+    project_dir = tmp_path / "mods" / "sweet-potato-bounty"
+    args = argparse.Namespace(
+        aes_key="0xabc",
+        pak_path="pakchunk0-Windows.pak",
+        project_dir=str(project_dir),
+        staged_root="",
+        multiplier=3.0,
+        repak_path="",
+    )
+    assert cli.cmd_prepare_sweet_potato_json_mod(args) == 0
+
+    out_file = project_dir / "input" / "staged" / "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/DA_LT_Foliage_Potato.json"
+    data = json.loads(out_file.read_text(encoding="utf-8"))
+    assert data["LootData"][0]["Min"] == 6
+    assert data["LootData"][0]["Max"] == 9
+    assert data["LootData"][1]["Min"] == 1
+    assert data["LootData"][1]["Max"] == 1
