@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_WORKFLOWS = {"mob_rss", "boar_resources", "cayenne_pepper", "sweet_potato"}
+SUPPORTED_WORKFLOWS = {"mob_rss", "boar_resources", "cayenne_pepper", "sweet_potato", "bundle"}
 SUPPORTED_INSTALL_TARGETS = {"single-player", "multiplayer", "dedicated", "custom"}
 
 
@@ -30,6 +30,7 @@ class ModRecipe:
     report_name: str
     mob_keywords: list[str] = field(default_factory=list)
     resource_types: list[str] = field(default_factory=list)
+    included_mods: list[str] = field(default_factory=list)
     package_variants: bool = True
     validate_outputs: bool = True
     nexus: NexusMetadata = field(default_factory=lambda: NexusMetadata(summary=""))
@@ -107,6 +108,7 @@ def parse_recipe(raw: dict[str, Any]) -> ModRecipe:
         report_name=str(raw["report_name"]).strip(),
         mob_keywords=_as_list(raw.get("mob_keywords"), "mob_keywords"),
         resource_types=_as_list(raw.get("resource_types"), "resource_types"),
+        included_mods=_as_list(raw.get("included_mods"), "included_mods"),
         package_variants=bool(raw.get("package_variants", True)),
         validate_outputs=bool(raw.get("validate_outputs", True)),
         nexus=NexusMetadata(
@@ -133,6 +135,8 @@ def validate_recipe(recipe: ModRecipe) -> None:
         raise ValueError("mob_rss recipes require mob_keywords.")
     if recipe.workflow == "boar_resources" and not recipe.resource_types:
         raise ValueError("boar_resources recipes require resource_types.")
+    if recipe.workflow == "bundle" and not recipe.included_mods:
+        raise ValueError("bundle recipes require included_mods.")
 
 
 def write_recipe(path: Path, recipe: dict[str, Any]) -> None:

@@ -87,6 +87,12 @@ Build a recipe-driven mod, including variants and zip packages:
 python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\goat-bounty" --backup-first
 ```
 
+Build the combined all-in-one Windrose Bounty bundle:
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\windrose-bounty" --backup-first
+```
+
 Generate the Nexus Mods description from `docs/mod_recipe.json`:
 
 ```powershell

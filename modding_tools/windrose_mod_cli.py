@@ -919,6 +919,51 @@ def prepare_recipe_variant(
     repak_path: str,
 ) -> Path:
     report_path = project_dir / "docs" / f"{recipe.report_name}_x{label}.json"
+    if recipe.workflow == "bundle":
+        included_reports = []
+        for included_slug in recipe.included_mods:
+            included_project_dir = workspace_root() / "mods" / included_slug
+            included_recipe = load_recipe(included_project_dir)
+            before = staged_file_hashes(variant_staged_dir)
+            included_report = prepare_recipe_variant(
+                included_recipe,
+                project_dir,
+                variant_staged_dir,
+                multiplier,
+                label,
+                repak_path,
+            )
+            after = staged_file_hashes(variant_staged_dir)
+            conflicts = sorted(
+                str(path.relative_to(variant_staged_dir))
+                for path, digest in before.items()
+                if path.name != ".gitkeep" and path in after and after[path] != digest
+            )
+            if conflicts:
+                raise ValueError(
+                    f"Bundle recipe '{recipe.display_name}' has path conflicts while adding "
+                    f"'{included_slug}': {conflicts}"
+                )
+            included_reports.append(
+                {
+                    "slug": included_slug,
+                    "display_name": included_recipe.display_name,
+                    "workflow": included_recipe.workflow,
+                    "report_path": str(included_report),
+                    "added_file_count": len(set(after) - set(before)),
+                }
+            )
+        write_json(
+            report_path,
+            {
+                "generated_utc": utc_now_iso(),
+                "multiplier": multiplier,
+                "included_mods": included_reports,
+                "notes": ["Combined bundle build. Included recipes share one staged folder."],
+            },
+        )
+        return report_path
+
     common = {
         "aes_key": "",
         "pak_path": "pakchunk0-Windows.pak",
@@ -949,6 +994,18 @@ def prepare_recipe_variant(
     return report_path
 
 
+def staged_file_hashes(root: Path) -> dict[Path, str]:
+    import hashlib
+
+    hashes = {}
+    if not root.exists():
+        return hashes
+    for path in root.rglob("*"):
+        if path.is_file():
+            hashes[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
+
+
 def expected_recipe_path_fragments(recipe: ModRecipe) -> list[str]:
     if recipe.workflow == "mob_rss":
         return [f"DA_LT_Mob_{keyword}" for keyword in recipe.mob_keywords]
@@ -958,6 +1015,12 @@ def expected_recipe_path_fragments(recipe: ModRecipe) -> list[str]:
         return ["Pepper"]
     if recipe.workflow == "sweet_potato":
         return ["Potato"]
+    if recipe.workflow == "bundle":
+        fragments = []
+        for included_slug in recipe.included_mods:
+            included_recipe = load_recipe(workspace_root() / "mods" / included_slug)
+            fragments.extend(expected_recipe_path_fragments(included_recipe))
+        return fragments
     return []
 
 
@@ -978,8 +1041,16 @@ def validate_variant_outputs(recipe: ModRecipe, variant_staged_dir: Path, genera
         text = path.as_posix().lower()
         if any(fragment.lower() in text for fragment in fragments):
             matched_files.append(str(path))
-        if recipe.workflow == "mob_rss" and "/loottables/mobs/rss/da_lt_mob_" in text:
-            if not any(keyword.lower() in text for keyword in recipe.mob_keywords):
+        mob_keywords = recipe.mob_keywords
+        if recipe.workflow == "bundle":
+            mob_keywords = []
+            for included_slug in recipe.included_mods:
+                included_recipe = load_recipe(workspace_root() / "mods" / included_slug)
+                mob_keywords.extend(included_recipe.mob_keywords)
+                if included_recipe.workflow == "boar_resources":
+                    mob_keywords.extend(["boar", "boarf", "boarmega"])
+        if recipe.workflow in {"mob_rss", "bundle"} and "/loottables/mobs/rss/da_lt_mob_" in text and mob_keywords:
+            if not any(keyword.lower() in text for keyword in mob_keywords):
                 unrelated_mob_files.append(str(path))
 
     if not matched_files:
@@ -1055,6 +1126,10 @@ def cmd_build_mod(args: argparse.Namespace) -> int:
             backup_done = True
         if should_install:
             removed = clear_matching_paks(mods_dir, output_pak.stem)
+            if recipe.workflow == "bundle":
+                for included_slug in recipe.included_mods:
+                    included_recipe = load_recipe(workspace_root() / "mods" / included_slug)
+                    removed += clear_matching_paks(mods_dir, f"{included_recipe.pak_name}_P")
             if removed:
                 print(f"Removed {removed} existing variant pak(s) from mods dir")
 

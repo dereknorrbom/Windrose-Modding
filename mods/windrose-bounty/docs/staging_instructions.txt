@@ -1,0 +1,3 @@
+Place cooked override assets under input/staged using mount-relative paths.
+
+For Windrose Bounty, generated variant staging is assembled from the included mod recipes under output/generated/x<label>/staged.

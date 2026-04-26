@@ -535,6 +535,50 @@ def test_load_recipe_validates_mob_keywords(tmp_path: Path):
         cli.load_recipe(project)
 
 
+def test_load_recipe_accepts_bundle_included_mods(tmp_path: Path):
+    project = tmp_path / "mods" / "windrose-bounty"
+    docs = project / "docs"
+    docs.mkdir(parents=True)
+    (docs / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Windrose Bounty",
+                "slug": "windrose-bounty",
+                "pak_name": "WindroseBounty",
+                "workflow": "bundle",
+                "included_mods": ["boar-loot", "goat-bounty"],
+                "report_name": "windrose_bounty_bundle_report",
+                "variants": [2, 3],
+            }
+        ),
+        encoding="utf-8",
+    )
+    recipe = cli.load_recipe(project)
+    assert recipe.workflow == "bundle"
+    assert recipe.included_mods == ["boar-loot", "goat-bounty"]
+
+
+def test_bundle_recipe_requires_included_mods(tmp_path: Path):
+    project = tmp_path / "mods" / "windrose-bounty"
+    docs = project / "docs"
+    docs.mkdir(parents=True)
+    (docs / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Windrose Bounty",
+                "slug": "windrose-bounty",
+                "pak_name": "WindroseBounty",
+                "workflow": "bundle",
+                "report_name": "windrose_bounty_bundle_report",
+                "variants": [2, 3],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        cli.load_recipe(project)
+
+
 def test_cmd_build_mod_uses_recipe_packages_and_variant_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = tmp_path / "repo"
     project = repo / "mods" / "goat-bounty"
@@ -629,6 +673,164 @@ def test_cmd_build_mod_uses_recipe_packages_and_variant_reports(tmp_path: Path, 
     report = json.loads((project / "output" / "variant_build_report.json").read_text(encoding="utf-8"))
     assert report["variants"][1]["installed"] is True
     assert report["variants"][0]["package"].endswith("GoatBounty_P_x2.zip")
+
+
+def test_cmd_build_mod_bundle_combines_included_recipes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo = tmp_path / "repo"
+    monkeypatch.setattr(cli, "workspace_root", lambda: repo)
+    monkeypatch.setattr(cli, "repo_root", lambda: repo / "modding_tools")
+    monkeypatch.setenv("WINDROSE_MODS_DIR", str(repo / "mods_install"))
+
+    bundle_project = repo / "mods" / "windrose-bounty"
+    staged = bundle_project / "input" / "staged"
+    staged.mkdir(parents=True)
+    (staged / ".gitkeep").write_text("", encoding="utf-8")
+    (bundle_project / "docs").mkdir(parents=True)
+    (bundle_project / "docs" / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Windrose Bounty",
+                "slug": "windrose-bounty",
+                "pak_name": "WindroseBounty",
+                "workflow": "bundle",
+                "included_mods": ["goat-bounty", "wolf-bounty"],
+                "report_name": "windrose_bounty_bundle_report",
+                "variants": [2],
+                "default_install_variant": 2,
+                "install_target": "custom",
+                "package_variants": True,
+                "validate_outputs": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (bundle_project / "docs" / "build_config.example.json").write_text(
+        json.dumps(
+            {
+                "input_dir": r"<REPO_ROOT>\mods\windrose-bounty\input\staged",
+                "output_pak": r"<REPO_ROOT>\mods\windrose-bounty\output\WindroseBounty_P.pak",
+                "mods_dir": "<WINDROSE_MODS_DIR>",
+                "backup_dir": r"<REPO_ROOT>\mods\windrose-bounty\output\mods_backups",
+                "mount_point": "../../../",
+                "version": "V11",
+                "compression": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+    for slug, keyword in [("goat-bounty", "goat"), ("wolf-bounty", "wolf")]:
+        project = repo / "mods" / slug
+        (project / "docs").mkdir(parents=True)
+        (project / "docs" / "mod_recipe.json").write_text(
+            json.dumps(
+                {
+                    "display_name": slug,
+                    "slug": slug,
+                        "pak_name": cli.pak_name_from_mod_name(slug),
+                    "workflow": "mob_rss",
+                    "mob_keywords": [keyword],
+                    "report_name": f"{keyword}_loot_edit_report",
+                    "variants": [2],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def fake_prepare_mob(args):
+        keyword = args.mob_keywords.split(",")[0]
+        out = Path(args.staged_root) / "R5" / "Plugins" / "R5BusinessRules" / "Content" / "LootTables" / "Mobs" / "Rss" / f"DA_LT_Mob_{keyword.title()}_Meat.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"LootData": [{"Min": args.multiplier, "Max": args.multiplier}]}), encoding="utf-8")
+        Path(args.report_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.report_path).write_text(json.dumps({"keyword": keyword}), encoding="utf-8")
+        return 0
+
+    def fake_pack(ns):
+        output = Path(ns.output_pak)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"pak")
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_prepare_mob_rss_json_mod", fake_prepare_mob)
+    monkeypatch.setattr(cli, "cmd_pack_pak", fake_pack)
+    monkeypatch.setattr(cli, "cmd_backup_mods", lambda ns: 0)
+    removed_prefixes = []
+    monkeypatch.setattr(
+        cli,
+        "clear_matching_paks",
+        lambda mods_dir, stem_prefix: removed_prefixes.append(stem_prefix) or 0,
+    )
+
+    args = argparse.Namespace(
+        project_dir=str(bundle_project),
+        config="",
+        install_multipliers="",
+        install_target="",
+        backup_first=False,
+        no_package=False,
+        no_validate=False,
+        repak_path="",
+    )
+    assert cli.cmd_build_mod(args) == 0
+    generated = bundle_project / "output" / "generated" / "x2" / "staged"
+    assert (generated / "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Goat_Meat.json").exists()
+    assert (generated / "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Wolf_Meat.json").exists()
+    bundle_report = json.loads((bundle_project / "docs" / "windrose_bounty_bundle_report_x2.json").read_text(encoding="utf-8"))
+    assert [item["slug"] for item in bundle_report["included_mods"]] == ["goat-bounty", "wolf-bounty"]
+    assert (bundle_project / "output" / "WindroseBounty_P_x2.zip").exists()
+    assert removed_prefixes == ["WindroseBounty_P", "GoatBounty_P", "WolfBounty_P"]
+
+
+def test_bundle_recipe_detects_path_conflicts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo = tmp_path / "repo"
+    monkeypatch.setattr(cli, "workspace_root", lambda: repo)
+
+    bundle_project = repo / "mods" / "windrose-bounty"
+    (bundle_project / "docs").mkdir(parents=True)
+    recipe = cli.ModRecipe(
+        display_name="Windrose Bounty",
+        slug="windrose-bounty",
+        pak_name="WindroseBounty",
+        workflow="bundle",
+        variants=[2.0],
+        default_install_variant=None,
+        install_target="custom",
+        report_name="bundle_report",
+        included_mods=["first", "second"],
+    )
+    for slug in recipe.included_mods:
+        project = repo / "mods" / slug
+        (project / "docs").mkdir(parents=True)
+        (project / "docs" / "mod_recipe.json").write_text(
+            json.dumps(
+                {
+                    "display_name": slug,
+                    "slug": slug,
+                    "pak_name": slug.title(),
+                    "workflow": "mob_rss",
+                    "mob_keywords": [slug],
+                    "report_name": f"{slug}_report",
+                    "variants": [2],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def fake_prepare(recipe, project_dir, variant_staged_dir, multiplier, label, repak_path):
+        if recipe.workflow == "bundle":
+            return original_prepare(recipe, project_dir, variant_staged_dir, multiplier, label, repak_path)
+        out = variant_staged_dir / "same.json"
+        out.write_text(recipe.slug, encoding="utf-8")
+        report = project_dir / "docs" / f"{recipe.report_name}_x{label}.json"
+        report.write_text("{}", encoding="utf-8")
+        return report
+
+    original_prepare = cli.prepare_recipe_variant
+    monkeypatch.setattr(cli, "prepare_recipe_variant", fake_prepare)
+    staged = bundle_project / "output" / "generated" / "x2" / "staged"
+    staged.mkdir(parents=True)
+    with pytest.raises(ValueError, match="path conflicts"):
+        cli.prepare_recipe_variant(recipe, bundle_project, staged, 2.0, "2", "")
 
 
 def test_cmd_discover_mob_loot_reports_final_and_rss_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

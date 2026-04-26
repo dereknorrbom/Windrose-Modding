@@ -1,0 +1,58 @@
+{
+  "generated_utc": "2026-04-26T03:57:17.146657+00:00",
+  "multiplier": 10.0,
+  "included_mods": [
+    {
+      "slug": "boar-loot",
+      "display_name": "Boar Loot",
+      "workflow": "boar_resources",
+      "report_path": "mods\\windrose-bounty\\docs\\boar_hide_edit_report_x10.json",
+      "added_file_count": 19
+    },
+    {
+      "slug": "cayenne-pepper-yield",
+      "display_name": "Cayenne Bounty",
+      "workflow": "cayenne_pepper",
+      "report_path": "mods\\windrose-bounty\\docs\\cayenne_pepper_edit_report_x10.json",
+      "added_file_count": 2
+    },
+    {
+      "slug": "crab-bounty",
+      "display_name": "Crab Bounty",
+      "workflow": "mob_rss",
+      "report_path": "mods\\windrose-bounty\\docs\\crab_loot_edit_report_x10.json",
+      "added_file_count": 14
+    },
+    {
+      "slug": "crocodile-bounty",
+      "display_name": "Crocodile Bounty",
+      "workflow": "mob_rss",
+      "report_path": "mods\\windrose-bounty\\docs\\crocodile_loot_edit_report_x10.json",
+      "added_file_count": 15
+    },
+    {
+      "slug": "goat-bounty",
+      "display_name": "Goat Bounty",
+      "workflow": "mob_rss",
+      "report_path": "mods\\windrose-bounty\\docs\\goat_loot_edit_report_x10.json",
+      "added_file_count": 28
+    },
+    {
+      "slug": "sweet-potato-bounty",
+      "display_name": "Sweet Potato Bounty",
+      "workflow": "sweet_potato",
+      "report_path": "mods\\windrose-bounty\\docs\\sweet_potato_edit_report_x10.json",
+      "added_file_count": 3
+    },
+    {
+      "slug": "wolf-bounty",
+      "display_name": "Wolf Bounty",
+      "workflow": "mob_rss",
+      "report_path": "mods\\windrose-bounty\\docs\\wolf_loot_edit_report_x10.json",
+      "added_file_count": 24
+    }
+  ],
+  "notes": [
+    "Combined bundle build. Included recipes share one staged folder."
+  ]
+}

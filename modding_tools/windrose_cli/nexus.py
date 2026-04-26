@@ -25,14 +25,24 @@ def _variant_lines(recipe: ModRecipe) -> list[str]:
     return lines
 
 
+def _join_human(values: list[str]) -> str:
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]} and {values[1]}"
+    return f"{', '.join(values[:-1])}, and {values[-1]}"
+
+
 def render_nexus_description(recipe: ModRecipe) -> str:
     variant_title = " / ".join(
         f"{int(v) if float(int(v)) == float(v) else v}x" for v in recipe.variants
     )
     summary = recipe.nexus.summary or f"Increase {recipe.display_name} loot quantities while keeping vanilla drop chances intact."
-    resources = ", ".join(recipe.nexus.resources) if recipe.nexus.resources else "configured resource drops"
-    covered = ", ".join(recipe.nexus.covered)
-    covered_sentence = f" {covered} are covered." if covered else ""
+    resources = _join_human(recipe.nexus.resources) if recipe.nexus.resources else "configured resource drops"
+    covered = _join_human(recipe.nexus.covered)
+    covered_sentence = f" Covers {covered}." if covered else ""
     details = f"\n\n[size=3][color=#D4D4D8]{recipe.nexus.details}[/color][/size]" if recipe.nexus.details else ""
 
     lines = [

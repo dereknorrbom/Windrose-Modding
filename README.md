@@ -2,10 +2,12 @@
 
 This repository is structured to support multiple Windrose mods over time, while sharing a single reusable tooling stack.
 
+It also supports `mods/windrose-bounty`, an optional all-in-one bundle that combines the current bounty recipes into one pak while preserving the individual mods for selective installs.
+
 ## Recommended Layout
 
 - `modding_tools/` - shared CLI/scripts used by all mods.
-- `mods/boar-loot/` - active boar loot mod project.
+- `mods/` - standalone mod projects plus the combined `windrose-bounty` bundle.
 - `docs/` - repo-level guides and conventions.
 
 ## Start Here
