@@ -23,3 +23,4 @@
 # Editor / OS
 .DS_Store
 Thumbs.db
+**/docs/*_bundle_report*.json
