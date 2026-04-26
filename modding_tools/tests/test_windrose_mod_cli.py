@@ -566,6 +566,61 @@ def test_cmd_prepare_sweet_potato_json_mod_scales_potato_only(tmp_path: Path, mo
     assert data["LootData"][1]["Max"] == 1
 
 
+def test_cmd_prepare_loot_table_items_json_mod_scales_matching_items_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    paks_dir = tmp_path / "paks"
+    paks_dir.mkdir()
+    (paks_dir / "pakchunk0-Windows.pak").write_bytes(b"pak")
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+
+    fish_path = "R5/Plugins/R5BusinessRules/Content/LootTables/Fishing/FishList/DA_LT_FishData_Coast_SmallFish.json"
+    junk_path = "R5/Plugins/R5BusinessRules/Content/LootTables/Fishing/FishList/DA_LT_FishData_Coast_Items.json"
+    payloads = {
+        fish_path: {
+            "LootData": [
+                {"Min": 1, "Max": 1, "Weight": 5, "LootItem": "DA_CID_Misc_Fish_Small_ReefSnapper_T01"},
+                {"Min": 1, "Max": 1, "Weight": 5, "LootItem": "DA_EID_MeleeWeapon_Club_Fish_Base"},
+            ]
+        },
+        junk_path: {"LootData": [{"Min": 1, "Max": 1, "Weight": 2, "LootItem": "DA_DID_Resource_Nails_T01"}]},
+    }
+
+    def fake_run_capture(cmd, cwd=None):
+        if "list" in cmd:
+            return "\n".join(payloads)
+        if "get" in cmd:
+            return json.dumps(payloads[cmd[-1]])
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("repak.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture", fake_run_capture)
+
+    project_dir = tmp_path / "mods" / "fish-bounty"
+    args = argparse.Namespace(
+        loot_table_paths=f"{fish_path},{junk_path}",
+        item_include_keywords="misc_fish",
+        item_exclude_keywords="",
+        aes_key="0xabc",
+        pak_path="pakchunk0-Windows.pak",
+        project_dir=str(project_dir),
+        staged_root="",
+        report_name="fish_bounty_edit_report",
+        report_path="",
+        multiplier=3.0,
+        repak_path="",
+    )
+    assert cli.cmd_prepare_loot_table_items_json_mod(args) == 0
+
+    out_file = project_dir / "input" / "staged" / fish_path
+    data = json.loads(out_file.read_text(encoding="utf-8"))
+    assert data["LootData"][0]["Min"] == 3
+    assert data["LootData"][0]["Max"] == 3
+    assert data["LootData"][1]["Min"] == 1
+    assert data["LootData"][1]["Max"] == 1
+    assert not (project_dir / "input" / "staged" / junk_path).exists()
+
+
 def test_load_recipe_validates_mob_keywords(tmp_path: Path):
     project = tmp_path / "mods" / "goat-bounty"
     docs = project / "docs"
@@ -610,6 +665,32 @@ def test_load_recipe_accepts_mob_rss_filters(tmp_path: Path):
     recipe = cli.load_recipe(project)
     assert recipe.rss_include_keywords == ["gunpowder"]
     assert recipe.rss_exclude_keywords == ["blackbeardsign"]
+
+
+def test_load_recipe_accepts_loot_table_items_workflow(tmp_path: Path):
+    project = tmp_path / "mods" / "fish-bounty"
+    docs = project / "docs"
+    docs.mkdir(parents=True)
+    (docs / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Fish Bounty",
+                "slug": "fish-bounty",
+                "pak_name": "FishBounty",
+                "workflow": "loot_table_items",
+                "loot_table_paths": [
+                    "R5/Plugins/R5BusinessRules/Content/LootTables/Fishing/FishList/DA_LT_FishData_Coast_SmallFish.json"
+                ],
+                "item_include_keywords": ["misc_fish"],
+                "report_name": "fish_bounty_edit_report",
+                "variants": [2, 3],
+            }
+        ),
+        encoding="utf-8",
+    )
+    recipe = cli.load_recipe(project)
+    assert recipe.workflow == "loot_table_items"
+    assert recipe.item_include_keywords == ["misc_fish"]
 
 
 def test_load_recipe_accepts_bundle_included_mods(tmp_path: Path):

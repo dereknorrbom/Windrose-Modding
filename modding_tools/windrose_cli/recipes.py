@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_WORKFLOWS = {"mob_rss", "boar_resources", "cayenne_pepper", "sweet_potato", "bundle"}
+SUPPORTED_WORKFLOWS = {"mob_rss", "boar_resources", "cayenne_pepper", "sweet_potato", "loot_table_items", "bundle"}
 SUPPORTED_INSTALL_TARGETS = {"single-player", "multiplayer", "dedicated", "custom"}
 
 
@@ -31,6 +31,9 @@ class ModRecipe:
     mob_keywords: list[str] = field(default_factory=list)
     rss_include_keywords: list[str] = field(default_factory=list)
     rss_exclude_keywords: list[str] = field(default_factory=list)
+    loot_table_paths: list[str] = field(default_factory=list)
+    item_include_keywords: list[str] = field(default_factory=list)
+    item_exclude_keywords: list[str] = field(default_factory=list)
     resource_types: list[str] = field(default_factory=list)
     included_mods: list[str] = field(default_factory=list)
     package_variants: bool = True
@@ -111,6 +114,9 @@ def parse_recipe(raw: dict[str, Any]) -> ModRecipe:
         mob_keywords=_as_list(raw.get("mob_keywords"), "mob_keywords"),
         rss_include_keywords=_as_list(raw.get("rss_include_keywords"), "rss_include_keywords"),
         rss_exclude_keywords=_as_list(raw.get("rss_exclude_keywords"), "rss_exclude_keywords"),
+        loot_table_paths=_as_list(raw.get("loot_table_paths"), "loot_table_paths"),
+        item_include_keywords=_as_list(raw.get("item_include_keywords"), "item_include_keywords"),
+        item_exclude_keywords=_as_list(raw.get("item_exclude_keywords"), "item_exclude_keywords"),
         resource_types=_as_list(raw.get("resource_types"), "resource_types"),
         included_mods=_as_list(raw.get("included_mods"), "included_mods"),
         package_variants=bool(raw.get("package_variants", True)),
@@ -139,6 +145,10 @@ def validate_recipe(recipe: ModRecipe) -> None:
         raise ValueError("mob_rss recipes require mob_keywords.")
     if recipe.workflow == "boar_resources" and not recipe.resource_types:
         raise ValueError("boar_resources recipes require resource_types.")
+    if recipe.workflow == "loot_table_items" and not recipe.loot_table_paths:
+        raise ValueError("loot_table_items recipes require loot_table_paths.")
+    if recipe.workflow == "loot_table_items" and not recipe.item_include_keywords:
+        raise ValueError("loot_table_items recipes require item_include_keywords.")
     if recipe.workflow == "bundle" and not recipe.included_mods:
         raise ValueError("bundle recipes require included_mods.")
 

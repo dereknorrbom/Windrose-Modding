@@ -985,6 +985,15 @@ def prepare_recipe_variant(
     elif recipe.workflow == "boar_resources":
         args = argparse.Namespace(**common, resource_types=",".join(recipe.resource_types))
         cmd_prepare_boar_hide_json_mod(args)
+    elif recipe.workflow == "loot_table_items":
+        args = argparse.Namespace(
+            **common,
+            loot_table_paths=",".join(recipe.loot_table_paths),
+            item_include_keywords=",".join(recipe.item_include_keywords),
+            item_exclude_keywords=",".join(recipe.item_exclude_keywords),
+            report_name=recipe.report_name,
+        )
+        cmd_prepare_loot_table_items_json_mod(args)
     elif recipe.workflow == "cayenne_pepper":
         args = argparse.Namespace(**common)
         cmd_prepare_cayenne_pepper_json_mod(args)
@@ -1013,6 +1022,8 @@ def expected_recipe_path_fragments(recipe: ModRecipe) -> list[str]:
         return [f"DA_LT_Mob_{keyword}" for keyword in recipe.mob_keywords]
     if recipe.workflow == "boar_resources":
         return [f"DA_LT_Mob_Boar", *[resource.capitalize() for resource in recipe.resource_types]]
+    if recipe.workflow == "loot_table_items":
+        return [Path(path).name for path in recipe.loot_table_paths]
     if recipe.workflow == "cayenne_pepper":
         return ["Pepper"]
     if recipe.workflow == "sweet_potato":
@@ -1202,6 +1213,50 @@ def parse_optional_keywords(raw: str) -> set[str]:
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
+def parse_required_list(raw: str, field_name: str) -> list[str]:
+    values = [part.strip() for part in raw.split(",") if part.strip()]
+    if not values:
+        raise ValueError(f"At least one {field_name} is required.")
+    return values
+
+
+def loot_row_filter_text(item: dict) -> str:
+    parts = [str(item.get("LootItem") or ""), str(item.get("LootTable") or "")]
+    return " ".join(parts).lower()
+
+
+def scale_loot_rows(data: dict, multiplier: float, include_keywords: set[str], exclude_keywords: set[str]) -> list[dict]:
+    file_edits = []
+    for index, item in enumerate(data.get("LootData", [])):
+        if not isinstance(item, dict):
+            continue
+        if "Min" not in item or "Max" not in item:
+            continue
+        filter_text = loot_row_filter_text(item)
+        if include_keywords and not any(keyword in filter_text for keyword in include_keywords):
+            continue
+        if exclude_keywords and any(keyword in filter_text for keyword in exclude_keywords):
+            continue
+        old_min = int(item["Min"])
+        old_max = int(item["Max"])
+        new_min = scale_value(old_min, multiplier)
+        new_max = scale_value(old_max, multiplier)
+        item["Min"] = new_min
+        item["Max"] = new_max
+        file_edits.append(
+            {
+                "row_index": index,
+                "loot_item": item.get("LootItem"),
+                "loot_table": item.get("LootTable"),
+                "old_min": old_min,
+                "old_max": old_max,
+                "new_min": new_min,
+                "new_max": new_max,
+            }
+        )
+    return file_edits
+
+
 def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
     repak = resolve_tool("repak.exe", args.repak_path)
     aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "").strip()
@@ -1387,6 +1442,69 @@ def cmd_prepare_mob_rss_json_mod(args: argparse.Namespace) -> int:
     }
     write_json(report_path, report)
     print(f"Prepared mob RSS JSON overrides in: {staged_root}")
+    print(f"Wrote report: {report_path}")
+    return 0
+
+
+def cmd_prepare_loot_table_items_json_mod(args: argparse.Namespace) -> int:
+    repak = resolve_tool("repak.exe", args.repak_path)
+    aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "").strip()
+    if not aes_key:
+        raise ValueError("AES key is required. Pass --aes-key or set WINDROSE_AES_KEY.")
+    loot_table_paths = parse_required_list(args.loot_table_paths, "loot table path")
+    include_keywords = parse_optional_keywords(args.item_include_keywords)
+    if not include_keywords:
+        raise ValueError("At least one item include keyword is required.")
+    exclude_keywords = parse_optional_keywords(getattr(args, "item_exclude_keywords", ""))
+
+    pak_path = resolve_pak_path(args.pak_path)
+    project_dir = Path(args.project_dir)
+    staged_root = Path(args.staged_root) if args.staged_root else (project_dir / "input" / "staged")
+    report_path = (
+        Path(args.report_path)
+        if args.report_path
+        else (project_dir / "docs" / f"{args.report_name}.json")
+    )
+
+    if not pak_path.exists():
+        raise FileNotFoundError(f"Pak not found: {pak_path}")
+    staged_root.mkdir(parents=True, exist_ok=True)
+
+    list_out = run_cmd_capture([str(repak), "--aes-key", aes_key, "list", str(pak_path)])
+    available_paths = {line.strip() for line in list_out.splitlines()}
+    missing = sorted(path for path in loot_table_paths if path not in available_paths)
+    if missing:
+        raise RuntimeError(f"Configured loot table path(s) not found in pak: {missing}")
+
+    edited = []
+    for path in loot_table_paths:
+        raw = run_cmd_capture([str(repak), "--aes-key", aes_key, "get", str(pak_path), path])
+        data = json.loads(raw)
+        file_edits = scale_loot_rows(data, args.multiplier, include_keywords, exclude_keywords)
+        if not file_edits:
+            continue
+
+        out_file = staged_root / Path(path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        edited.append({"path": path, "output_file": str(out_file), "edits": file_edits})
+
+    if not edited:
+        raise RuntimeError("No matching loot rows were edited.")
+
+    report = {
+        "generated_utc": utc_now_iso(),
+        "pak_path": str(pak_path),
+        "multiplier": args.multiplier,
+        "loot_table_paths": loot_table_paths,
+        "item_include_keywords": sorted(include_keywords),
+        "item_exclude_keywords": sorted(exclude_keywords),
+        "edited_file_count": len(edited),
+        "edited_files": edited,
+        "notes": ["Loot chances/weights are unchanged. Only matching Min/Max quantities are scaled."],
+    }
+    write_json(report_path, report)
+    print(f"Prepared loot table JSON overrides in: {staged_root}")
     print(f"Wrote report: {report_path}")
     return 0
 
@@ -2057,6 +2175,60 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_prepare_mob_rss.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_prepare_mob_rss.set_defaults(func=cmd_prepare_mob_rss_json_mod)
+
+    p_prepare_loot_items = sub.add_parser(
+        "prepare-loot-table-items-json-mod",
+        help="Extract explicit loot table JSON files and scale matching item rows",
+    )
+    p_prepare_loot_items.add_argument(
+        "--loot-table-paths",
+        required=True,
+        help="Comma-separated pak JSON paths to edit.",
+    )
+    p_prepare_loot_items.add_argument(
+        "--item-include-keywords",
+        required=True,
+        help="Comma-separated LootItem/LootTable keyword filters for rows to scale.",
+    )
+    p_prepare_loot_items.add_argument(
+        "--item-exclude-keywords",
+        default="",
+        help="Optional comma-separated LootItem/LootTable keyword filters to skip.",
+    )
+    p_prepare_loot_items.add_argument(
+        "--aes-key",
+        default="",
+        help="AES key (hex or base64). Optional if WINDROSE_AES_KEY is set.",
+    )
+    p_prepare_loot_items.add_argument(
+        "--pak-path",
+        default="pakchunk0-Windows.pak",
+        help="Pak file containing loot JSON entries. If relative, resolves via WINDROSE_PAKS_DIR.",
+    )
+    p_prepare_loot_items.add_argument("--project-dir", required=True, help="Mod project directory root")
+    p_prepare_loot_items.add_argument(
+        "--staged-root",
+        default="",
+        help="Optional explicit staged output root. Defaults to <project_dir>/input/staged",
+    )
+    p_prepare_loot_items.add_argument(
+        "--report-name",
+        default="loot_table_items_edit_report",
+        help="Report filename without extension (default: loot_table_items_edit_report)",
+    )
+    p_prepare_loot_items.add_argument(
+        "--report-path",
+        default="",
+        help="Optional explicit report path. Overrides --report-name location.",
+    )
+    p_prepare_loot_items.add_argument(
+        "--multiplier",
+        type=float,
+        default=2.0,
+        help="Scale factor for matching Min/Max quantities (default: 2.0)",
+    )
+    p_prepare_loot_items.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
+    p_prepare_loot_items.set_defaults(func=cmd_prepare_loot_table_items_json_mod)
 
     p_prepare_cayenne = sub.add_parser(
         "prepare-cayenne-pepper-json-mod",

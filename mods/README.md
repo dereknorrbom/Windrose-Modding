@@ -10,6 +10,7 @@ Each folder here is either a Windrose mod project or a scaffold template for fut
 - `crab-bounty/` - crab, Thorn Fiddler, and drowned crab loot variants.
 - `crocodile-bounty/` - crocodile and corrupted crocodile loot variants.
 - `dodo-bounty/` - dodo and female dodo loot variants.
+- `fish-bounty/` - fishing catch quantity variants.
 - `goat-bounty/` - goat loot variants.
 - `sweet-potato-bounty/` - sweet potato harvest quantity variants.
 - `wolf-bounty/` - wolf and alpha wolf loot variants.

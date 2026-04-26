@@ -10,6 +10,7 @@
     "crab-bounty",
     "crocodile-bounty",
     "dodo-bounty",
+    "fish-bounty",
     "goat-bounty",
     "sweet-potato-bounty",
     "wolf-bounty"
@@ -34,6 +35,7 @@
       "crab loot",
       "crocodile loot",
       "dodo loot",
+      "fish catches",
       "goat loot",
       "sweet potatoes",
       "wolf loot"
@@ -45,6 +47,7 @@
       "Crab Bounty",
       "Crocodile Bounty",
       "Dodo Bounty",
+      "Fish Bounty",
       "Goat Bounty",
       "Sweet Potato Bounty",
       "Wolf Bounty"

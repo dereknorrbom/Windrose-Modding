@@ -1,0 +1,46 @@
+{
+  "display_name": "Fish Bounty",
+  "slug": "fish-bounty",
+  "pak_name": "FishBounty",
+  "workflow": "loot_table_items",
+  "loot_table_paths": [
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Fishing/FishList/DA_LT_FishData_Coast_SmallFish.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Fishing/FishList/DA_LT_FishData_Ocean_MediumFish.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Fishing/FishList/DA_LT_FishData_Ocean_LargeFish.json"
+  ],
+  "item_include_keywords": [
+    "misc_fish"
+  ],
+  "report_name": "fish_bounty_loot_edit_report",
+  "variants": [
+    2,
+    3,
+    5,
+    10
+  ],
+  "default_install_variant": 3,
+  "install_target": "custom",
+  "package_variants": true,
+  "validate_outputs": true,
+  "nexus": {
+    "summary": "Increase fish catch quantities while keeping vanilla fishing chances intact.",
+    "resources": [
+      "small fish",
+      "medium fish",
+      "large fish"
+    ],
+    "covered": [
+      "Reef Snapper",
+      "Blue Tang",
+      "Pink Wrasse",
+      "Sapphire Wrasse",
+      "Moon Angelfish",
+      "Queen Angelfish",
+      "Emerald Bluefish",
+      "Red Snapper",
+      "Giant Mackerel",
+      "Great Barracuda"
+    ],
+    "details": "This mod scales the number of actual fish items caught from fishing loot tables. Junk catches, pouch coins, the fish club weapon, butchering yields, recipes, and quest collection data are left unchanged."
+  }
+}
