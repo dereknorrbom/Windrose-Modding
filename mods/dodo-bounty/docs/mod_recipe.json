@@ -1,0 +1,34 @@
+{
+  "display_name": "Dodo Bounty",
+  "slug": "dodo-bounty",
+  "pak_name": "DodoBounty",
+  "workflow": "mob_rss",
+  "mob_keywords": [
+    "dodo"
+  ],
+  "report_name": "dodo_bounty_loot_edit_report",
+  "variants": [
+    2,
+    3,
+    5,
+    10
+  ],
+  "default_install_variant": 3,
+  "install_target": "custom",
+  "package_variants": true,
+  "validate_outputs": true,
+  "nexus": {
+    "summary": "Increase dodo and female dodo loot quantities while keeping vanilla drop chances intact.",
+    "resources": [
+      "bird meat",
+      "feathers",
+      "fat",
+      "dodo eggs",
+      "dodo head drops"
+    ],
+    "covered": [
+      "dodos",
+      "female dodos"
+    ]
+  }
+}

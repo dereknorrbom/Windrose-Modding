@@ -4,6 +4,8 @@ This repository is structured to support multiple Windrose mods over time, while
 
 It also supports `mods/windrose-bounty`, an optional all-in-one bundle that combines the current bounty recipes into one pak while preserving the individual mods for selective installs.
 
+Current bounty mods include boars, cayenne peppers, crabs, crocodiles, dodos, goats, sweet potatoes, and wolves.
+
 ## Recommended Layout
 
 - `modding_tools/` - shared CLI/scripts used by all mods.

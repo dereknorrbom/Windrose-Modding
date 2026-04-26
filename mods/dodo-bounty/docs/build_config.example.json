@@ -1,0 +1,10 @@
+{
+  "name": "DodoBounty",
+  "input_dir": "<REPO_ROOT>\\mods\\dodo-bounty\\input\\staged",
+  "output_pak": "<REPO_ROOT>\\mods\\dodo-bounty\\output\\DodoBounty_P.pak",
+  "mods_dir": "<WINDROSE_MODS_DIR>",
+  "mount_point": "../../../",
+  "version": "V11",
+  "compression": "",
+  "backup_dir": "<REPO_ROOT>\\mods\\dodo-bounty\\output\\mods_backups"
+}

@@ -8,6 +8,7 @@
     "cayenne-pepper-yield",
     "crab-bounty",
     "crocodile-bounty",
+    "dodo-bounty",
     "goat-bounty",
     "sweet-potato-bounty",
     "wolf-bounty"
@@ -30,6 +31,7 @@
       "cayenne peppers",
       "crab loot",
       "crocodile loot",
+      "dodo loot",
       "goat loot",
       "sweet potatoes",
       "wolf loot"
@@ -39,6 +41,7 @@
       "Cayenne Bounty",
       "Crab Bounty",
       "Crocodile Bounty",
+      "Dodo Bounty",
       "Goat Bounty",
       "Sweet Potato Bounty",
       "Wolf Bounty"
