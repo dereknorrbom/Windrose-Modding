@@ -29,6 +29,8 @@ class ModRecipe:
     install_target: str
     report_name: str
     mob_keywords: list[str] = field(default_factory=list)
+    rss_include_keywords: list[str] = field(default_factory=list)
+    rss_exclude_keywords: list[str] = field(default_factory=list)
     resource_types: list[str] = field(default_factory=list)
     included_mods: list[str] = field(default_factory=list)
     package_variants: bool = True
@@ -107,6 +109,8 @@ def parse_recipe(raw: dict[str, Any]) -> ModRecipe:
         install_target=install_target,
         report_name=str(raw["report_name"]).strip(),
         mob_keywords=_as_list(raw.get("mob_keywords"), "mob_keywords"),
+        rss_include_keywords=_as_list(raw.get("rss_include_keywords"), "rss_include_keywords"),
+        rss_exclude_keywords=_as_list(raw.get("rss_exclude_keywords"), "rss_exclude_keywords"),
         resource_types=_as_list(raw.get("resource_types"), "resource_types"),
         included_mods=_as_list(raw.get("included_mods"), "included_mods"),
         package_variants=bool(raw.get("package_variants", True)),

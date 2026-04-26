@@ -5,6 +5,7 @@
   "workflow": "bundle",
   "included_mods": [
     "boar-loot",
+    "blackbeard-bounty",
     "cayenne-pepper-yield",
     "crab-bounty",
     "crocodile-bounty",
@@ -28,6 +29,7 @@
     "summary": "A growing all-in-one bounty bundle for players who want the resource boosts without juggling a pile of separate pak files.",
     "resources": [
       "boar loot",
+      "Blackbeard pirate loot",
       "cayenne peppers",
       "crab loot",
       "crocodile loot",
@@ -38,6 +40,7 @@
     ],
     "covered": [
       "Boar Loot",
+      "Blackbeard Bounty",
       "Cayenne Bounty",
       "Crab Bounty",
       "Crocodile Bounty",

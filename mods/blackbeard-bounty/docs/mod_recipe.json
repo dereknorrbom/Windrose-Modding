@@ -1,0 +1,46 @@
+{
+  "display_name": "Blackbeard Bounty",
+  "slug": "blackbeard-bounty",
+  "pak_name": "BlackbeardBounty",
+  "workflow": "mob_rss",
+  "mob_keywords": [
+    "blackbeard"
+  ],
+  "rss_include_keywords": [
+    "gunpowder",
+    "bullet",
+    "rum",
+    "peanut",
+    "guinea",
+    "blackbeardsign"
+  ],
+  "report_name": "blackbeard_bounty_loot_edit_report",
+  "variants": [
+    2,
+    3,
+    5,
+    10
+  ],
+  "default_install_variant": 3,
+  "install_target": "custom",
+  "package_variants": true,
+  "validate_outputs": true,
+  "nexus": {
+    "summary": "Increase Blackbeard pirate loot quantities while keeping vanilla drop chances intact.",
+    "resources": [
+      "gunpowder",
+      "bullets",
+      "rum",
+      "peanuts",
+      "guineas",
+      "Blackbeard signs"
+    ],
+    "covered": [
+      "Blackbeard Grenadiers",
+      "Blackbeard Musketeers",
+      "Blackbeard Sailors",
+      "Blackbeard Sergeants"
+    ],
+    "details": "This version scales Blackbeard pirate RSS loot tables for the listed resources only. Final/key-bearing tables are left alone so quest-specific drops are not modified."
+  }
+}

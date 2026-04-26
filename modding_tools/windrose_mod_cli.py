@@ -47,7 +47,7 @@ SWEET_POTATO_PATHS = [
     "R5/Plugins/R5BusinessRules/Content/LootTables/Crop/DA_LT_Foliage_Crop_Potato.json",
 ]
 MOB_RSS_JSON_PATTERN = re.compile(
-    r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_(?P<mob>[A-Za-z0-9]+)_(?P<resource>[A-Za-z0-9]+)(?:_[0-9]+)?\.json$"
+    r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_(?P<mob>[A-Za-z0-9]+)_(?P<resource>[A-Za-z0-9]+)(?:_[A-Za-z0-9]+)*\.json$"
 )
 
 
@@ -977,6 +977,8 @@ def prepare_recipe_variant(
         args = argparse.Namespace(
             **common,
             mob_keywords=",".join(recipe.mob_keywords),
+            rss_include_keywords=",".join(recipe.rss_include_keywords),
+            rss_exclude_keywords=",".join(recipe.rss_exclude_keywords),
             report_name=recipe.report_name,
         )
         cmd_prepare_mob_rss_json_mod(args)
@@ -1196,6 +1198,10 @@ def parse_keywords(raw: str) -> set[str]:
     return values
 
 
+def parse_optional_keywords(raw: str) -> set[str]:
+    return {part.strip().lower() for part in raw.split(",") if part.strip()}
+
+
 def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
     repak = resolve_tool("repak.exe", args.repak_path)
     aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "").strip()
@@ -1294,6 +1300,8 @@ def cmd_prepare_mob_rss_json_mod(args: argparse.Namespace) -> int:
     if not aes_key:
         raise ValueError("AES key is required. Pass --aes-key or set WINDROSE_AES_KEY.")
     target_keywords = parse_keywords(args.mob_keywords)
+    include_keywords = parse_optional_keywords(getattr(args, "rss_include_keywords", ""))
+    exclude_keywords = parse_optional_keywords(getattr(args, "rss_exclude_keywords", ""))
 
     pak_path_input = Path(args.pak_path)
     if pak_path_input.is_absolute():
@@ -1325,6 +1333,12 @@ def cmd_prepare_mob_rss_json_mod(args: argparse.Namespace) -> int:
             continue
         mob_name = match.group("mob").lower()
         if any(keyword in mob_name for keyword in target_keywords):
+            resource_name = match.group("resource").lower()
+            filter_text = f"{path.lower()} {mob_name} {resource_name}"
+            if include_keywords and not any(keyword in filter_text for keyword in include_keywords):
+                continue
+            if exclude_keywords and any(keyword in filter_text for keyword in exclude_keywords):
+                continue
             candidates.append(path)
 
     if not candidates:
@@ -1365,6 +1379,8 @@ def cmd_prepare_mob_rss_json_mod(args: argparse.Namespace) -> int:
         "pak_path": str(pak_path),
         "multiplier": args.multiplier,
         "mob_keywords": sorted(target_keywords),
+        "rss_include_keywords": sorted(include_keywords),
+        "rss_exclude_keywords": sorted(exclude_keywords),
         "edited_file_count": len(edited),
         "edited_files": edited,
         "notes": ["Loot chances/weights are unchanged. Only Min/Max quantities are scaled."],
@@ -1992,6 +2008,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--mob-keywords",
         required=True,
         help="Comma-separated mob keyword filters, example: crocodile,corruptedcrocodile,whitecrocodile",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--rss-include-keywords",
+        default="",
+        help="Optional comma-separated RSS table filters; when set, only matching table paths/resources are scaled.",
+    )
+    p_prepare_mob_rss.add_argument(
+        "--rss-exclude-keywords",
+        default="",
+        help="Optional comma-separated RSS table filters to skip after mob matching.",
     )
     p_prepare_mob_rss.add_argument(
         "--aes-key",

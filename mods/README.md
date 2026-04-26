@@ -5,6 +5,7 @@ Each folder here is either a Windrose mod project or a scaffold template for fut
 ## Current Mods
 
 - `boar-loot/` - boar leather, meat, and tusk quantity variants.
+- `blackbeard-bounty/` - Blackbeard pirate loot quantity variants.
 - `cayenne-pepper-yield/` - cayenne pepper harvest quantity variants.
 - `crab-bounty/` - crab, Thorn Fiddler, and drowned crab loot variants.
 - `crocodile-bounty/` - crocodile and corrupted crocodile loot variants.

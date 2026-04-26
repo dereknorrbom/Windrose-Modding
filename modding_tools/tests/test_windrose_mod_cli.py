@@ -464,6 +464,58 @@ def test_cmd_prepare_mob_rss_json_mod_filters_and_scales(tmp_path: Path, monkeyp
     assert not boar_file.exists()
 
 
+def test_cmd_prepare_mob_rss_json_mod_supports_rss_include_exclude_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    paks_dir = tmp_path / "paks"
+    paks_dir.mkdir()
+    (paks_dir / "pakchunk0-Windows.pak").write_bytes(b"pak")
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+
+    paths = [
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_BlackBeard_Sailor_Gunpowder.json",
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_BlackBeard_Sailor_Gunpowder_low1.json",
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_BlackBeard_Sailor_Rum.json",
+        "R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_BlackBeard_Sergeant_BlackbeardSign.json",
+    ]
+    sample_json = {"LootData": [{"Min": 1, "Max": 2, "LootItem": "X", "LootTable": "None"}]}
+
+    def fake_run_capture(cmd, cwd=None):
+        if "list" in cmd:
+            return "\n".join(paths)
+        if "get" in cmd:
+            return json.dumps(sample_json)
+        raise AssertionError(f"Unexpected command: {cmd}")
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("repak.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture", fake_run_capture)
+
+    project_dir = tmp_path / "mods" / "blackbeard-gunpowder"
+    args = argparse.Namespace(
+        mob_keywords="blackbeard",
+        rss_include_keywords="gunpowder",
+        rss_exclude_keywords="",
+        aes_key="0xabc",
+        pak_path="pakchunk0-Windows.pak",
+        project_dir=str(project_dir),
+        staged_root="",
+        report_name="blackbeard_gunpowder_edit_report",
+        report_path="",
+        multiplier=2.0,
+        repak_path="",
+    )
+    assert cli.cmd_prepare_mob_rss_json_mod(args) == 0
+
+    staged_root = project_dir / "input" / "staged"
+    assert (staged_root / paths[0]).exists()
+    assert (staged_root / paths[1]).exists()
+    assert not (staged_root / paths[2]).exists()
+    assert not (staged_root / paths[3]).exists()
+    report = json.loads((project_dir / "docs" / "blackbeard_gunpowder_edit_report.json").read_text(encoding="utf-8"))
+    assert report["rss_include_keywords"] == ["gunpowder"]
+    assert report["edited_file_count"] == 2
+
+
 def test_cmd_prepare_sweet_potato_json_mod_scales_potato_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     paks_dir = tmp_path / "paks"
     paks_dir.mkdir()
@@ -533,6 +585,31 @@ def test_load_recipe_validates_mob_keywords(tmp_path: Path):
     )
     with pytest.raises(ValueError):
         cli.load_recipe(project)
+
+
+def test_load_recipe_accepts_mob_rss_filters(tmp_path: Path):
+    project = tmp_path / "mods" / "blackbeard-gunpowder"
+    docs = project / "docs"
+    docs.mkdir(parents=True)
+    (docs / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Blackbeard Gunpowder",
+                "slug": "blackbeard-gunpowder",
+                "pak_name": "BlackbeardGunpowder",
+                "workflow": "mob_rss",
+                "mob_keywords": ["blackbeard"],
+                "rss_include_keywords": ["gunpowder"],
+                "rss_exclude_keywords": ["blackbeardsign"],
+                "report_name": "blackbeard_gunpowder_edit_report",
+                "variants": [2, 3],
+            }
+        ),
+        encoding="utf-8",
+    )
+    recipe = cli.load_recipe(project)
+    assert recipe.rss_include_keywords == ["gunpowder"]
+    assert recipe.rss_exclude_keywords == ["blackbeardsign"]
 
 
 def test_load_recipe_accepts_bundle_included_mods(tmp_path: Path):
