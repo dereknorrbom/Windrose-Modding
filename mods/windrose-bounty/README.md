@@ -16,6 +16,7 @@ The recipe lives in `docs/mod_recipe.json` and builds the 2x, 3x, 5x, and 10x co
 
 - `boar-loot`
 - `blackbeard-bounty`
+- `cane-sugar-bounty`
 - `cayenne-pepper-yield`
 - `crab-bounty`
 - `crocodile-bounty`

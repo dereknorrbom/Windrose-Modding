@@ -6,6 +6,7 @@
   "included_mods": [
     "boar-loot",
     "blackbeard-bounty",
+    "cane-sugar-bounty",
     "cayenne-pepper-yield",
     "crab-bounty",
     "crocodile-bounty",
@@ -31,6 +32,7 @@
     "resources": [
       "boar loot",
       "Blackbeard pirate loot",
+      "cane sugar",
       "cayenne peppers",
       "crab loot",
       "crocodile loot",
@@ -43,6 +45,7 @@
     "covered": [
       "Boar Loot",
       "Blackbeard Bounty",
+      "Cane Sugar Bounty",
       "Cayenne Bounty",
       "Crab Bounty",
       "Crocodile Bounty",

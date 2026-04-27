@@ -1,0 +1,53 @@
+{
+  "display_name": "Cane Sugar Bounty",
+  "slug": "cane-sugar-bounty",
+  "pak_name": "CaneSugarBounty",
+  "workflow": "loot_table_items",
+  "loot_table_paths": [
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsBigBattleFarms/DA_LT_Chest_HL_FarmVillage_01.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsBigBattleFarms/DA_LT_Chest_HL_FarmVillage_02.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsFarm/DA_LT_Chest_Highlands_Farm_01_1.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsFarm/DA_LT_Chest_Highlands_Farm_01_3.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsFarm/DA_LT_Chest_Highlands_Farm_02_3.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsFarm/DA_LT_Chest_Highlands_Farm_02_4.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsFarm/DA_LT_Chest_Highlands_Farm_03_2.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsFarm/DA_LT_Chest_Highlands_Farm_03_4.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsFarm/DA_LT_Chest_Highlands_Farm_06_2.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/HighlandsFarm/DA_LT_Chest_Highlands_Farm_06_4.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/PersonalChest/Highlands/DA_LT_Chest_PersonalChest_Sugar20.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/Pickups/DA_LT_PickupChest_HL_Senkamati_Pot_Sugar.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/ConsumableContainer/TradeGoods/DA_LT_TradeGoods_SugarT02.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/DA_LT_LootContainer_BritishSupply_03.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/DA_LT_LootContainer_BritishSupply_04.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/PickupResource/DA_LT_PickupChest_CJ_Bale_02.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/PickupResource/DA_LT_PickupChest_HL_Bale_02.json"
+  ],
+  "item_include_keywords": [
+    "resource_canesugar"
+  ],
+  "report_name": "cane_sugar_bounty_loot_edit_report",
+  "variants": [
+    2,
+    3,
+    5,
+    10
+  ],
+  "default_install_variant": 3,
+  "install_target": "custom",
+  "package_variants": true,
+  "validate_outputs": true,
+  "nexus": {
+    "summary": "Increase raw cane sugar quantities while keeping vanilla loot chances intact.",
+    "resources": [
+      "raw cane sugar"
+    ],
+    "covered": [
+      "Highlands farm chests",
+      "Senkamati sugar pots",
+      "British supply containers",
+      "pickup bales",
+      "sugar trade containers"
+    ],
+    "details": "This mod intentionally targets raw CaneSugar resource rows only. Sugarcane alcohol, ship trade-good sugar cargo, recipes, vendors, and quest data are left unchanged."
+  }
+}

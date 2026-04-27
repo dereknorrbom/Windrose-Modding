@@ -1,0 +1,10 @@
+{
+  "name": "CaneSugarBounty",
+  "input_dir": "<REPO_ROOT>\\mods\\cane-sugar-bounty\\input\\staged",
+  "output_pak": "<REPO_ROOT>\\mods\\cane-sugar-bounty\\output\\CaneSugarBounty_P.pak",
+  "mods_dir": "<WINDROSE_MODS_DIR>",
+  "mount_point": "../../../",
+  "version": "V11",
+  "compression": "",
+  "backup_dir": "<REPO_ROOT>\\mods\\cane-sugar-bounty\\output\\mods_backups"
+}
