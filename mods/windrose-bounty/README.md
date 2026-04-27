@@ -23,6 +23,7 @@ The recipe lives in `docs/mod_recipe.json` and builds the 2x, 3x, 5x, and 10x co
 - `dodo-bounty`
 - `fish-bounty`
 - `goat-bounty`
+- `ship-bounty`
 - `sweet-potato-bounty`
 - `wolf-bounty`
 

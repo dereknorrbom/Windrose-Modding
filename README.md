@@ -4,7 +4,7 @@ This repository is structured to support multiple Windrose mods over time, while
 
 It also supports `mods/windrose-bounty`, an optional all-in-one bundle that combines the current bounty recipes into one pak while preserving the individual mods for selective installs.
 
-Current bounty mods include Blackbeard pirates, boars, cane sugar, cayenne peppers, crabs, crocodiles, dodos, fish, goats, sweet potatoes, and wolves.
+Current bounty mods include Blackbeard pirates, boars, cane sugar, cayenne peppers, crabs, crocodiles, dodos, fish, goats, ship loot, sweet potatoes, and wolves.
 
 ## Recommended Layout
 
