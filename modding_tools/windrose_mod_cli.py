@@ -32,6 +32,7 @@ DEFAULT_GAME_MODS_DIR = Path(
     r"c:\Program Files (x86)\Steam\steamapps\common\Windrose\R5\Content\Paks\~mods"
 )
 PACK_IGNORE_FILE_NAMES = {".gitkeep"}
+CUE4PARSE_CLI_NAME = "cue4parse.exe"
 BOAR_LEATHER_JSON_PATTERN = re.compile(
     r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar(?:F|Mega)?_Leather(?:_[0-9]+)?\.json$"
 )
@@ -436,12 +437,236 @@ def scaffold_mod_from_template(template_dir: Path, target_dir: Path, tokens: dic
 
 
 def cmd_tools_info(args: argparse.Namespace) -> int:
-    names = ["repak.exe", "u4pak.exe", "retoc.exe"]
+    names = ["repak.exe", "u4pak.exe", "retoc.exe", CUE4PARSE_CLI_NAME]
     payload: dict[str, str] = {}
     for name in names:
         p = bin_dir() / name
         payload[name] = str(p) if p.exists() else ""
     print(json.dumps(payload, indent=2))
+    return 0
+
+
+def safe_asset_slug(asset_path: str) -> str:
+    token = asset_path.strip().strip("\"'")
+    token = token.removesuffix(".uasset")
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "_", token).strip("_")
+    return token.lower() or "asset"
+
+
+def cue4parse_package_patterns(asset_path: str, explicit_patterns: list[str] | None = None) -> list[str]:
+    if explicit_patterns:
+        return [pattern for pattern in explicit_patterns if pattern.strip()]
+
+    package = asset_path.strip().strip("\"'")
+    leaf = Path(package).name.removesuffix(".uasset")
+    patterns = [package]
+    if package.startswith("/"):
+        patterns.append(package[1:])
+    if not package.endswith(".uasset"):
+        patterns.append(f"{package}.uasset")
+        if package.startswith("/"):
+            patterns.append(f"{package[1:]}.uasset")
+    if leaf:
+        patterns.append(f"*{leaf}*")
+    return list(dict.fromkeys(patterns))
+
+
+def run_cmd_capture_redacted(
+    cmd: list[str], redacted_cmd: list[str], cwd: Path | None = None, check: bool = True
+) -> tuple[int, str, str]:
+    completed = subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if check and completed.returncode != 0:
+        raise RuntimeError(
+            f"Command failed ({completed.returncode}): {' '.join(redacted_cmd)}\n{completed.stderr}"
+        )
+    return completed.returncode, completed.stdout, completed.stderr
+
+
+def extract_printable_strings(blob: bytes, min_length: int = 4) -> list[str]:
+    found: list[str] = []
+    current = bytearray()
+    for byte in blob:
+        if 32 <= byte <= 126:
+            current.append(byte)
+        else:
+            if len(current) >= min_length:
+                found.append(current.decode("ascii", "replace"))
+            current.clear()
+    if len(current) >= min_length:
+        found.append(current.decode("ascii", "replace"))
+    return found
+
+
+def binary_string_hits(path: Path, terms: list[str]) -> list[dict[str, object]]:
+    if not terms:
+        return []
+    blob = path.read_bytes()
+    lower_blob = blob.lower()
+    strings = extract_printable_strings(blob)
+    hits = []
+    for term in terms:
+        term_lower = term.lower()
+        encoded = term_lower.encode("utf-8", "replace")
+        offsets: list[int] = []
+        start = 0
+        while True:
+            found = lower_blob.find(encoded, start)
+            if found == -1:
+                break
+            offsets.append(found)
+            start = found + 1
+        nearby = [text for text in strings if term_lower in text.lower()]
+        if offsets or nearby:
+            hits.append({"term": term, "offsets": offsets[:20], "nearby_strings": nearby[:20]})
+    return hits
+
+
+def cmd_inspect_cooked_asset(args: argparse.Namespace) -> int:
+    cue4parse = resolve_tool(CUE4PARSE_CLI_NAME, args.cue4parse_path)
+    paks_dir_raw = args.paks_dir or os.environ.get("WINDROSE_PAKS_DIR", "")
+    if not paks_dir_raw:
+        raise ValueError("Pass --paks-dir or set WINDROSE_PAKS_DIR.")
+    paks_dir = Path(paks_dir_raw)
+    if not paks_dir.exists():
+        raise FileNotFoundError(f"Paks dir not found: {paks_dir}")
+
+    aes_key = args.aes_key or os.environ.get("WINDROSE_AES_KEY", "")
+    if not aes_key:
+        raise ValueError("Pass --aes-key or set WINDROSE_AES_KEY.")
+    mappings_raw = args.mappings or os.environ.get("WINDROSE_USMAP_PATH", "")
+    mappings_path = Path(mappings_raw) if mappings_raw else None
+    if mappings_path and not mappings_path.exists():
+        raise FileNotFoundError(f"Mappings file not found: {mappings_path}")
+
+    asset_path = args.asset_path.strip()
+    if not asset_path:
+        raise ValueError("--asset-path is required.")
+
+    output_path = Path(args.output) if args.output else None
+    if args.export_dir:
+        export_dir = Path(args.export_dir)
+    elif output_path:
+        export_dir = output_path.parent / f"{output_path.stem}_exports"
+    else:
+        export_dir = workspace_root() / "modding_tools" / "output" / "inspections" / safe_asset_slug(asset_path)
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    package_patterns = cue4parse_package_patterns(asset_path, args.package_pattern)
+    export_format = args.format
+    cmd = [
+        str(cue4parse),
+        "--input",
+        str(paks_dir),
+        "--output",
+        str(export_dir),
+        "--game",
+        args.game_version,
+        "--key",
+        aes_key,
+        "--format",
+        export_format,
+        "--yes",
+    ]
+    redacted_cmd = [
+        str(cue4parse),
+        "--input",
+        str(paks_dir),
+        "--output",
+        str(export_dir),
+        "--game",
+        args.game_version,
+        "--key",
+        "<redacted>",
+        "--format",
+        export_format,
+        "--yes",
+    ]
+    if mappings_path:
+        cmd.extend(["--mappings", str(mappings_path)])
+        redacted_cmd.extend(["--mappings", str(mappings_path)])
+    for pattern in package_patterns:
+        cmd.extend(["--package", pattern])
+        redacted_cmd.extend(["--package", pattern])
+    if args.verbose:
+        cmd.append("--verbose")
+        redacted_cmd.append("--verbose")
+
+    return_code, stdout, stderr = run_cmd_capture_redacted(cmd, redacted_cmd, check=False)
+    fallback_used = False
+    if return_code != 0 and export_format == "json" and args.raw_fallback:
+        fallback_used = True
+        export_format = "raw"
+        raw_cmd = list(cmd)
+        raw_redacted_cmd = list(redacted_cmd)
+        raw_cmd[raw_cmd.index("--format") + 1] = "raw"
+        raw_redacted_cmd[raw_redacted_cmd.index("--format") + 1] = "raw"
+        return_code, fallback_stdout, fallback_stderr = run_cmd_capture_redacted(raw_cmd, raw_redacted_cmd, check=False)
+        stdout = f"{stdout}\n--- raw fallback stdout ---\n{fallback_stdout}"
+        stderr = f"{stderr}\n--- raw fallback stderr ---\n{fallback_stderr}"
+    if return_code != 0:
+        raise RuntimeError(f"CUE4Parse export failed for {asset_path}. See stderr in command output.\n{stderr}")
+
+    exported_json = sorted(export_dir.rglob("*.json"))
+    exported_files = sorted(path for path in export_dir.rglob("*") if path.is_file())
+    exports: list[dict[str, object]] = []
+    for path in exported_files:
+        item: dict[str, object] = {
+            "path": str(path),
+            "relative_path": path.relative_to(export_dir).as_posix(),
+            "size": path.stat().st_size,
+        }
+        if path.suffix.lower() == ".json":
+            try:
+                data = json.loads(path.read_text(encoding="utf-8-sig"))
+                item["top_level_type"] = data.get("$type") if isinstance(data, dict) else type(data).__name__
+                item["keys"] = list(data.keys()) if isinstance(data, dict) else []
+                if not args.no_include_data:
+                    item["data"] = data
+            except Exception as exc:  # pragma: no cover - defensive metadata for malformed exporter output
+                item["parse_error"] = str(exc)
+        else:
+            item["string_hits"] = binary_string_hits(path, args.scan_text)
+        exports.append(item)
+
+    payload: dict[str, object] = {
+        "generated_utc": utc_now_iso(),
+        "asset_path": asset_path,
+        "paks_dir": str(paks_dir),
+        "export_dir": str(export_dir),
+        "game_version": args.game_version,
+        "mappings": str(mappings_path) if mappings_path else "",
+        "format": export_format,
+        "raw_fallback_used": fallback_used,
+        "package_patterns": package_patterns,
+        "exported_json_count": len(exported_json),
+        "exported_file_count": len(exports),
+        "exports": exports,
+        "stdout": stdout,
+        "stderr": stderr,
+        "warnings": [],
+    }
+    if not exports:
+        payload["warnings"] = ["No files were exported. Try a different --asset-path or --package-pattern."]
+    elif fallback_used:
+        payload["warnings"] = [
+            "JSON export failed, so raw fallback was used. A mapping file may be required for full structured JSON."
+        ]
+
+    text = json.dumps(payload, indent=2)
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(text, encoding="utf-8")
+        print(f"Wrote cooked asset inspection: {output_path}")
+    else:
+        print(text)
     return 0
 
 
@@ -1942,6 +2167,70 @@ def build_parser() -> argparse.ArgumentParser:
     p_discover_mob_loot.add_argument("--output", default="", help="Optional output JSON path")
     p_discover_mob_loot.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_discover_mob_loot.set_defaults(func=cmd_discover_mob_loot)
+
+    p_inspect_cooked = sub.add_parser(
+        "inspect-cooked-asset",
+        help="Export a cooked Unreal asset to JSON with CUE4Parse.CLI",
+    )
+    p_inspect_cooked.add_argument("--asset-path", required=True, help="Unreal asset path, example: /Game/...")
+    p_inspect_cooked.add_argument(
+        "--package-pattern",
+        action="append",
+        default=[],
+        help="Explicit CUE4Parse package path/pattern. Can be repeated. Defaults are derived from --asset-path.",
+    )
+    p_inspect_cooked.add_argument(
+        "--paks-dir",
+        default="",
+        help="Path containing Windrose pak/ucas/utoc files. Optional if WINDROSE_PAKS_DIR is set.",
+    )
+    p_inspect_cooked.add_argument(
+        "--aes-key",
+        default="",
+        help="AES key. Optional if WINDROSE_AES_KEY is set. Redacted from command errors.",
+    )
+    p_inspect_cooked.add_argument(
+        "--mappings",
+        default="",
+        help="Optional .usmap mappings file. Optional if WINDROSE_USMAP_PATH is set.",
+    )
+    p_inspect_cooked.add_argument("--output", default="", help="Optional JSON report path")
+    p_inspect_cooked.add_argument(
+        "--export-dir",
+        default="",
+        help="Optional directory for raw CUE4Parse JSON exports",
+    )
+    p_inspect_cooked.add_argument(
+        "--game-version",
+        default="GAME_UE5_LATEST",
+        help="CUE4Parse game/version enum. Defaults to GAME_UE5_LATEST.",
+    )
+    p_inspect_cooked.add_argument(
+        "--format",
+        default="json",
+        choices=["json", "raw", "csv"],
+        help="CUE4Parse output format. Defaults to json.",
+    )
+    p_inspect_cooked.add_argument(
+        "--no-raw-fallback",
+        action="store_false",
+        dest="raw_fallback",
+        help="Do not fall back to raw asset export when JSON export fails.",
+    )
+    p_inspect_cooked.add_argument(
+        "--scan-text",
+        action="append",
+        default=[],
+        help="When raw files are exported, scan their bytes for this text. Can be repeated.",
+    )
+    p_inspect_cooked.add_argument(
+        "--no-include-data",
+        action="store_true",
+        help="Only list exported JSON metadata; do not embed parsed JSON data in the report.",
+    )
+    p_inspect_cooked.add_argument("--verbose", action="store_true", help="Pass verbose mode to CUE4Parse.CLI")
+    p_inspect_cooked.add_argument("--cue4parse-path", default="", help="Optional explicit cue4parse.exe path")
+    p_inspect_cooked.set_defaults(func=cmd_inspect_cooked_asset)
 
     p_tools = sub.add_parser("tools-info", help="Show installed toolkit executable paths")
     p_tools.set_defaults(func=cmd_tools_info)

@@ -81,6 +81,30 @@ Discover mob loot tables before making a mod:
 python ".\modding_tools\windrose_mod_cli.py" discover-mob-loot --keyword "goat"
 ```
 
+Inspect cooked Unreal assets without opening a GUI:
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" inspect-cooked-asset --asset-path "/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values" --output ".\modding_tools\output\inspections\ct_alchemy_ge_values.json"
+```
+
+Cooked asset inspection uses `cue4parse.exe` and may need a `.usmap` mappings file for full JSON output. Put the mappings file somewhere local, then set:
+
+```powershell
+WINDROSE_USMAP_PATH=<REPO_ROOT>\.local\mappings\Windrose.usmap
+```
+
+For the bandage timing investigation, the relevant scriptable assets are:
+
+- `/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values`
+- `/Game/Gameplay/ItemsLogic/Consumables/Bandage/GE_Consumable_Bandages_T01`
+- `/Game/Gameplay/ItemsLogic/Consumables/Bandage/DA_ConsumableAbilityData_Bandages_T01`
+
+Current inspected values:
+
+- `Alchemy_Bandages_T01_Duration` = `30.0`
+- `Alchemy_Bandages_T01_TickPeriod` = `0.5`
+- `Alchemy_Bandages_T01_HealthPerTick` = `15.0`
+
 Build a recipe-driven mod, including variants and zip packages:
 
 ```powershell
@@ -161,7 +185,7 @@ The suite covers:
 ## Notes
 
 - This toolkit discovers and correlates Unreal object paths in containers.
-- It does not perform general `.uasset` authoring workflows.
+- It can inspect cooked `.uasset` data through `inspect-cooked-asset`, but it does not yet perform general `.uasset` authoring workflows.
 - Plugin-mounted assets are common; do not assume only `/Game/...` paths.
 - Build config supports tokens in path fields (`input_dir`, `output_pak`, `mods_dir`, `backup_dir`):
   - `<REPO_ROOT>`

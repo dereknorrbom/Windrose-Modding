@@ -87,6 +87,118 @@ def test_cmd_pack_pak_filters_scaffold_placeholders(tmp_path: Path, monkeypatch:
     assert cli.cmd_pack_pak(args) == 0
 
 
+def test_cue4parse_package_patterns_include_wildcard():
+    patterns = cli.cue4parse_package_patterns("/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values")
+    assert "/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values" in patterns
+    assert "Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uasset" in patterns
+    assert "*CT_Alchemy_GE_Values*" in patterns
+
+
+def test_cmd_inspect_cooked_asset_exports_json_with_mappings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    paks_dir = tmp_path / "Paks"
+    paks_dir.mkdir()
+    mappings = tmp_path / "Windrose.usmap"
+    mappings.write_bytes(b"usmap")
+    output = tmp_path / "inspection.json"
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_cmd_capture_redacted(cmd, redacted_cmd, cwd=None, check=True):
+        captured["cmd"] = cmd
+        captured["redacted_cmd"] = redacted_cmd
+        export_dir = Path(cmd[cmd.index("--output") + 1])
+        asset_json = export_dir / "R5" / "Content" / "Gameplay" / "ItemsLogic" / "Consumables" / "CT_Alchemy_GE_Values.json"
+        asset_json.parent.mkdir(parents=True, exist_ok=True)
+        asset_json.write_text(
+            json.dumps(
+                [
+                    {
+                        "Type": "CurveTable",
+                        "Rows": {
+                            "Alchemy_Bandages_T01_Duration": {"Keys": [{"Time": 1.0, "Value": 30.0}]}
+                        },
+                    }
+                ]
+            ),
+            encoding="utf-8-sig",
+        )
+        return 0, "", "Processed 1 packages"
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("cue4parse.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture_redacted", fake_run_cmd_capture_redacted)
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+    monkeypatch.setenv("WINDROSE_AES_KEY", "0xsecret")
+    monkeypatch.setenv("WINDROSE_USMAP_PATH", str(mappings))
+
+    args = argparse.Namespace(
+        asset_path="/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values",
+        package_pattern=[],
+        paks_dir="",
+        aes_key="",
+        mappings="",
+        output=str(output),
+        export_dir="",
+        game_version="GAME_UE5_LATEST",
+        format="json",
+        raw_fallback=True,
+        scan_text=[],
+        no_include_data=False,
+        verbose=False,
+        cue4parse_path="",
+    )
+    assert cli.cmd_inspect_cooked_asset(args) == 0
+    assert "--mappings" in captured["cmd"]
+    assert "0xsecret" not in captured["redacted_cmd"]
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["mappings"] == str(mappings)
+    assert report["exported_json_count"] == 1
+    assert report["exports"][0]["data"][0]["Rows"]["Alchemy_Bandages_T01_Duration"]["Keys"][0]["Value"] == 30.0
+
+
+def test_cmd_inspect_cooked_asset_raw_fallback_scans_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    paks_dir = tmp_path / "Paks"
+    paks_dir.mkdir()
+    output = tmp_path / "inspection.json"
+    calls: list[str] = []
+
+    def fake_run_cmd_capture_redacted(cmd, redacted_cmd, cwd=None, check=True):
+        export_format = cmd[cmd.index("--format") + 1]
+        calls.append(export_format)
+        if export_format == "json":
+            return 1, "", "Could not load standard asset"
+        export_dir = Path(cmd[cmd.index("--output") + 1])
+        raw_asset = export_dir / "R5" / "Content" / "Gameplay" / "ItemsLogic" / "Consumables" / "CT_Alchemy_GE_Values.uasset"
+        raw_asset.parent.mkdir(parents=True, exist_ok=True)
+        raw_asset.write_bytes(b"\x00Alchemy_Bandages_T01_Duration\x00")
+        return 0, "", "Processed 1 packages"
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("cue4parse.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture_redacted", fake_run_cmd_capture_redacted)
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+    monkeypatch.setenv("WINDROSE_AES_KEY", "0xsecret")
+
+    args = argparse.Namespace(
+        asset_path="/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values",
+        package_pattern=[],
+        paks_dir="",
+        aes_key="",
+        mappings="",
+        output=str(output),
+        export_dir="",
+        game_version="GAME_UE5_LATEST",
+        format="json",
+        raw_fallback=True,
+        scan_text=["Alchemy_Bandages_T01_Duration"],
+        no_include_data=True,
+        verbose=False,
+        cue4parse_path="",
+    )
+    assert cli.cmd_inspect_cooked_asset(args) == 0
+    assert calls == ["json", "raw"]
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["raw_fallback_used"] is True
+    assert report["exports"][0]["string_hits"][0]["term"] == "Alchemy_Bandages_T01_Duration"
+
+
 def test_slug_and_pak_name_helpers():
     assert cli.slugify_mod_name("Better Boar Loot!!") == "better-boar-loot"
     assert cli.pak_name_from_mod_name("better boar loot") == "BetterBoarLoot"
