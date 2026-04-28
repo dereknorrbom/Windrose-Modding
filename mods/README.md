@@ -13,6 +13,7 @@ Each folder here is either a Windrose mod project or a scaffold template for fut
 - `dodo-bounty/` - dodo and female dodo loot variants.
 - `fish-bounty/` - fishing catch quantity variants.
 - `goat-bounty/` - goat loot variants.
+- `salt-and-coffee-bounty/` - raw salt and coffee quantity variants.
 - `ship-bounty/` - ship piastre and trade-good loot variants.
 - `sweet-potato-bounty/` - sweet potato harvest quantity variants.
 - `wolf-bounty/` - wolf and alpha wolf loot variants.

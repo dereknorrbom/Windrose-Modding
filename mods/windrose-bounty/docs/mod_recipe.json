@@ -13,6 +13,7 @@
     "dodo-bounty",
     "fish-bounty",
     "goat-bounty",
+    "salt-and-coffee-bounty",
     "ship-bounty",
     "sweet-potato-bounty",
     "wolf-bounty"
@@ -40,6 +41,7 @@
       "dodo loot",
       "fish catches",
       "goat loot",
+      "salt and coffee",
       "ship loot",
       "sweet potatoes",
       "wolf loot"
@@ -54,6 +56,7 @@
       "Dodo Bounty",
       "Fish Bounty",
       "Goat Bounty",
+      "Salt and Coffee Bounty",
       "Ship Bounty",
       "Sweet Potato Bounty",
       "Wolf Bounty"

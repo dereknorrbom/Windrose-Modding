@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ ODL_PATTERN = re.compile(rb"(?:/Game)?/R5BusinessRules/LootTablesOverrides/Mobs/
 DEFAULT_GAME_MODS_DIR = Path(
     r"c:\Program Files (x86)\Steam\steamapps\common\Windrose\R5\Content\Paks\~mods"
 )
+PACK_IGNORE_FILE_NAMES = {".gitkeep"}
 BOAR_LEATHER_JSON_PATTERN = re.compile(
     r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar(?:F|Mega)?_Leather(?:_[0-9]+)?\.json$"
 )
@@ -506,18 +508,33 @@ def cmd_pack_pak(args: argparse.Namespace) -> int:
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
     output_pak.parent.mkdir(parents=True, exist_ok=True)
 
-    cmd = [
-        str(repak),
-        "pack",
-        "--mount-point",
-        args.mount_point,
-        "--version",
-        args.version,
-    ]
-    if args.compression:
-        cmd.extend(["--compression", args.compression])
-    cmd.extend([str(input_dir), str(output_pak)])
-    run_cmd(cmd)
+    pack_input_dir = input_dir
+    temp_pack_root: Path | None = None
+    try:
+        if any(path.is_file() and path.name in PACK_IGNORE_FILE_NAMES for path in input_dir.rglob("*")):
+            temp_pack_root = Path(tempfile.mkdtemp(prefix="windrose_pack_"))
+            pack_input_dir = temp_pack_root / "staged"
+            shutil.copytree(
+                input_dir,
+                pack_input_dir,
+                ignore=shutil.ignore_patterns(*sorted(PACK_IGNORE_FILE_NAMES)),
+            )
+
+        cmd = [
+            str(repak),
+            "pack",
+            "--mount-point",
+            args.mount_point,
+            "--version",
+            args.version,
+        ]
+        if args.compression:
+            cmd.extend(["--compression", args.compression])
+        cmd.extend([str(pack_input_dir), str(output_pak)])
+        run_cmd(cmd)
+    finally:
+        if temp_pack_root is not None:
+            shutil.rmtree(temp_pack_root, ignore_errors=True)
 
     if args.install_to_mods:
         mods_dir = Path(args.install_to_mods)
@@ -815,7 +832,11 @@ def cmd_build_variants(args: argparse.Namespace) -> int:
         variant_staged_dir = generated_root / f"x{label}" / "staged"
         if variant_staged_dir.exists():
             shutil.rmtree(variant_staged_dir)
-        shutil.copytree(input_dir, variant_staged_dir)
+        shutil.copytree(
+            input_dir,
+            variant_staged_dir,
+            ignore=shutil.ignore_patterns(*sorted(PACK_IGNORE_FILE_NAMES)),
+        )
         variant_output = output_pak.with_name(f"{output_pak.stem}_x{label}{output_pak.suffix}")
 
         if args.prepare_command_template:
@@ -1128,7 +1149,11 @@ def cmd_build_mod(args: argparse.Namespace) -> int:
         variant_staged_dir = generated_root / f"x{label}" / "staged"
         if variant_staged_dir.exists():
             shutil.rmtree(variant_staged_dir)
-        shutil.copytree(input_dir, variant_staged_dir)
+        shutil.copytree(
+            input_dir,
+            variant_staged_dir,
+            ignore=shutil.ignore_patterns(*sorted(PACK_IGNORE_FILE_NAMES)),
+        )
 
         variant_output = output_pak.with_name(f"{output_pak.stem}_x{label}{output_pak.suffix}")
         edit_report = prepare_recipe_variant(recipe, project_dir, variant_staged_dir, mult, label, args.repak_path)

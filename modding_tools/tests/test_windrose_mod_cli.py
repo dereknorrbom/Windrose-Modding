@@ -56,6 +56,37 @@ def test_clear_matching_paks_removes_only_matching_files(tmp_path: Path):
     assert (mods_dir / "OtherMod.pak").exists()
 
 
+def test_cmd_pack_pak_filters_scaffold_placeholders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    input_dir = tmp_path / "staged"
+    asset_dir = input_dir / "R5" / "Plugins" / "R5BusinessRules" / "Content"
+    asset_dir.mkdir(parents=True)
+    (input_dir / ".gitkeep").write_text("", encoding="utf-8")
+    (asset_dir / "DA_LT_Test.json").write_text("{}", encoding="utf-8")
+    output_pak = tmp_path / "out" / "Test_P.pak"
+
+    def fake_run_cmd(cmd):
+        pack_input_dir = Path(cmd[-2])
+        assert pack_input_dir != input_dir
+        assert not (pack_input_dir / ".gitkeep").exists()
+        assert (pack_input_dir / "R5" / "Plugins" / "R5BusinessRules" / "Content" / "DA_LT_Test.json").exists()
+        output_pak.parent.mkdir(parents=True, exist_ok=True)
+        output_pak.write_bytes(b"pak")
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("repak.exe"))
+    monkeypatch.setattr(cli, "run_cmd", fake_run_cmd)
+
+    args = argparse.Namespace(
+        input_dir=str(input_dir),
+        output_pak=str(output_pak),
+        mount_point="../../../",
+        version="V11",
+        compression="",
+        install_to_mods="",
+        repak_path="",
+    )
+    assert cli.cmd_pack_pak(args) == 0
+
+
 def test_slug_and_pak_name_helpers():
     assert cli.slugify_mod_name("Better Boar Loot!!") == "better-boar-loot"
     assert cli.pak_name_from_mod_name("better boar loot") == "BetterBoarLoot"

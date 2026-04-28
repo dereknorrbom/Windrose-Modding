@@ -1,0 +1,50 @@
+{
+  "display_name": "Salt and Coffee Bounty",
+  "slug": "salt-and-coffee-bounty",
+  "pak_name": "SaltAndCoffeeBounty",
+  "workflow": "loot_table_items",
+  "loot_table_paths": [
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/TreasureTraveler/DA_LT_Chest_Traveller_06.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Chests/WaterPickups/DA_LT_XL1_LostBoatBig_CoffeeSalt.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Foliage/DA_LT_Mineral_Salt.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/PickupResource/DA_LT_PickupChest_CJ_Bale_04.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/PickupResource/DA_LT_PickupChest_HL_Bale_04.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/PickupResource/DA_LT_PickupResource_Salt_Big.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/PickupResource/DA_LT_PickupResource_Salt_Medium.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/PickupResource/DA_LT_PickupResource_Salt_Small.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Ships/Rss/DA_LT_Ships_Coffee_l1.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Ships/Rss/DA_LT_Ships_Coffee_w1.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Ships/Rss/DA_LT_Ships_Salt_l1.json",
+    "R5/Plugins/R5BusinessRules/Content/LootTables/Ships/Rss/DA_LT_Ships_Salt_w1.json"
+  ],
+  "item_include_keywords": [
+    "resource_salt",
+    "resource_coffee"
+  ],
+  "report_name": "salt_and_coffee_bounty_loot_edit_report",
+  "variants": [
+    2,
+    3,
+    5,
+    10
+  ],
+  "default_install_variant": 3,
+  "install_target": "custom",
+  "package_variants": true,
+  "validate_outputs": true,
+  "nexus": {
+    "summary": "Increase raw salt and coffee quantities while keeping vanilla loot chances intact.",
+    "resources": [
+      "raw salt",
+      "raw coffee"
+    ],
+    "covered": [
+      "floating lost boat coffee/salt loot",
+      "salt mineral and pickup resources",
+      "coffee bales",
+      "traveler coffee",
+      "ship raw salt and coffee RSS tables"
+    ],
+    "details": "This mod targets raw salt and raw coffee resource rows only. Salt/coffee trade-good crates, vendors, recipes, quest data, and unrelated ship loot are left unchanged to avoid stacking oddly with Ship Bounty."
+  }
+}

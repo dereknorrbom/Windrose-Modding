@@ -1,0 +1,7 @@
+Salt and Coffee Bounty staging instructions
+
+1) Prefer the recipe workflow:
+   python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\salt-and-coffee-bounty" --backup-first
+2) Generated JSON overrides should land under output/generated/<variant>/staged.
+3) Do not manually edit input/staged for variant builds.
+4) Only configured raw salt and raw coffee loot tables should be staged.
