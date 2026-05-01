@@ -9,7 +9,6 @@ import mmap
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -21,16 +20,25 @@ _MODULE_ROOT = Path(__file__).resolve().parent
 if str(_MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(_MODULE_ROOT))
 
+from windrose_cli.cli.errors import emit_json, run_with_error_handling
+from windrose_cli.config import env as config_env
 from windrose_cli.nexus import render_nexus_description
-from windrose_cli.packaging import package_pak_variant
+from windrose_cli.packaging import package_iostore_variant, package_pak_variant
+from windrose_cli.paths import DEFAULT_GAME_MODS_DIR as PACKAGE_DEFAULT_GAME_MODS_DIR
+from windrose_cli.paths import bin_dir as package_bin_dir
+from windrose_cli.paths import modding_tools_root, workspace_root as package_workspace_root
+from windrose_cli.pipelines.build import install_outputs, validate_package_mode
 from windrose_cli.recipes import ModRecipe, load_recipe, write_recipe
+from windrose_cli.tools import process as process_runner
+from windrose_cli.tools.common import resolve_tool as resolve_tool_impl
+from windrose_cli.tools.cue4parse import Cue4ParseClient
+from windrose_cli.tools.retoc import RetocClient
+from windrose_cli.workflows import json_loot as json_loot_workflow
 
 PATH_PATTERN = re.compile(rb"/Game/[A-Za-z0-9_./]+?(?=/Game/|$)")
 LT_PATTERN = re.compile(rb"(?:/Game)?/R5BusinessRules/LootTables/Mobs/DA_LT_Mob_[A-Za-z0-9_]+")
 ODL_PATTERN = re.compile(rb"(?:/Game)?/R5BusinessRules/LootTablesOverrides/Mobs/DA_ODL_Mob_[A-Za-z0-9_]+")
-DEFAULT_GAME_MODS_DIR = Path(
-    r"c:\Program Files (x86)\Steam\steamapps\common\Windrose\R5\Content\Paks\~mods"
-)
+DEFAULT_GAME_MODS_DIR = PACKAGE_DEFAULT_GAME_MODS_DIR
 PACK_IGNORE_FILE_NAMES = {".gitkeep"}
 CUE4PARSE_CLI_NAME = "cue4parse.exe"
 BANDAGE_CURVE_ASSET_REL = Path("R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values")
@@ -56,42 +64,19 @@ MOB_RSS_JSON_PATTERN = re.compile(
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parent
+    return modding_tools_root()
 
 
 def workspace_root() -> Path:
-    return repo_root().parent
+    return package_workspace_root()
 
 
 def bin_dir() -> Path:
-    return repo_root() / "bin"
+    return package_bin_dir()
 
 
 def load_local_env() -> None:
-    """
-    Load repo-local environment variables from .local/.env if present.
-    Existing process env vars take precedence.
-    """
-    env_path = workspace_root() / ".local" / ".env"
-    if not env_path.exists():
-        return
-
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            continue
-        if (value.startswith('"') and value.endswith('"')) or (
-            value.startswith("'") and value.endswith("'")
-        ):
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
+    config_env.load_local_env(workspace_root() / ".local" / ".env")
 
 
 def utc_now_iso() -> str:
@@ -316,46 +301,19 @@ def cmd_loot_manifest(args: argparse.Namespace) -> int:
 
 
 def resolve_tool(name: str, explicit_path: str | None = None) -> Path:
-    if explicit_path:
-        p = Path(explicit_path)
-        if not p.exists():
-            raise FileNotFoundError(f"Tool not found: {p}")
-        return p
-    candidate = bin_dir() / name
-    if candidate.exists():
-        return candidate
-    raise FileNotFoundError(
-        f"Could not resolve '{name}'. Put it in '{bin_dir()}' or pass an explicit tool path."
-    )
+    return resolve_tool_impl(name, explicit_path)
 
 
 def run_cmd(cmd: list[str], cwd: Path | None = None) -> None:
-    completed = subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=False)
-    if completed.returncode != 0:
-        raise RuntimeError(f"Command failed ({completed.returncode}): {' '.join(cmd)}")
+    process_runner.run_no_capture(cmd, cwd=cwd)
 
 
 def run_cmd_capture(cmd: list[str], cwd: Path | None = None) -> str:
-    completed = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"Command failed ({completed.returncode}): {' '.join(cmd)}\n{completed.stderr}"
-        )
-    return completed.stdout
+    return process_runner.run(cmd, cwd=cwd).stdout
 
 
 def run_shell_command(command: str, cwd: Path | None = None) -> None:
-    completed = subprocess.run(command, cwd=str(cwd) if cwd else None, check=False, shell=True)
-    if completed.returncode != 0:
-        raise RuntimeError(f"Shell command failed ({completed.returncode}): {command}")
+    process_runner.run_shell(command, cwd=cwd)
 
 
 def copy_file(src: Path, dst: Path) -> None:
@@ -387,8 +345,7 @@ def resolve_config_string(raw: str, config_path: Path, field_name: str) -> str:
                     f"Config field '{field_name}' uses {token} but corresponding environment value is not set."
                 )
             value = value.replace(token, replacement)
-    value = os.path.expandvars(value)
-    return value
+    return os.path.expandvars(value)
 
 
 def resolve_config_path(raw: str, config_path: Path, field_name: str) -> Path:
@@ -397,6 +354,28 @@ def resolve_config_path(raw: str, config_path: Path, field_name: str) -> Path:
     if not path.is_absolute():
         path = (config_path.parent / path).resolve()
     return path
+
+
+def parse_build_config(raw: dict, config_path: Path) -> config_env.BuildConfig:
+    mods_dir = (
+        resolve_config_path(str(raw["mods_dir"]), config_path, "mods_dir")
+        if "mods_dir" in raw
+        else DEFAULT_GAME_MODS_DIR
+    )
+    backup_dir = (
+        resolve_config_path(str(raw["backup_dir"]), config_path, "backup_dir")
+        if "backup_dir" in raw
+        else None
+    )
+    return config_env.BuildConfig(
+        input_dir=resolve_config_path(str(raw["input_dir"]), config_path, "input_dir"),
+        output_pak=resolve_config_path(str(raw["output_pak"]), config_path, "output_pak"),
+        mods_dir=mods_dir,
+        mount_point=resolve_config_string(str(raw.get("mount_point", "../../../")), config_path, "mount_point"),
+        version=resolve_config_string(str(raw.get("version", "V11")), config_path, "version"),
+        compression=resolve_config_string(str(raw.get("compression", "")), config_path, "compression"),
+        backup_dir=backup_dir,
+    )
 
 
 def slugify_mod_name(name: str) -> str:
@@ -443,7 +422,7 @@ def cmd_tools_info(args: argparse.Namespace) -> int:
     for name in names:
         p = bin_dir() / name
         payload[name] = str(p) if p.exists() else ""
-    print(json.dumps(payload, indent=2))
+    emit_json(payload)
     return 0
 
 
@@ -475,19 +454,7 @@ def cue4parse_package_patterns(asset_path: str, explicit_patterns: list[str] | N
 def run_cmd_capture_redacted(
     cmd: list[str], redacted_cmd: list[str], cwd: Path | None = None, check: bool = True
 ) -> tuple[int, str, str]:
-    completed = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if check and completed.returncode != 0:
-        raise RuntimeError(
-            f"Command failed ({completed.returncode}): {' '.join(redacted_cmd)}\n{completed.stderr}"
-        )
+    completed = process_runner.run(cmd, cwd=cwd, check=check, redacted_cmd=redacted_cmd)
     return completed.returncode, completed.stdout, completed.stderr
 
 
@@ -600,22 +567,7 @@ def extract_legacy_asset_with_retoc(
     asset_filter: str,
     unreal_version: str,
 ) -> None:
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    run_cmd(
-        [
-            str(retoc_path),
-            "to-legacy",
-            str(paks_dir),
-            str(output_dir),
-            "--filter",
-            asset_filter,
-            "--version",
-            unreal_version,
-            "--no-shaders",
-        ]
-    )
+    RetocClient(retoc_path).to_legacy(paks_dir, output_dir, asset_filter, unreal_version)
 
 
 def cmd_inspect_cooked_asset(args: argparse.Namespace) -> int:
@@ -650,54 +602,39 @@ def cmd_inspect_cooked_asset(args: argparse.Namespace) -> int:
 
     package_patterns = cue4parse_package_patterns(asset_path, args.package_pattern)
     export_format = args.format
-    cmd = [
-        str(cue4parse),
-        "--input",
-        str(paks_dir),
-        "--output",
-        str(export_dir),
-        "--game",
-        args.game_version,
-        "--key",
-        aes_key,
-        "--format",
-        export_format,
-        "--yes",
-    ]
-    redacted_cmd = [
-        str(cue4parse),
-        "--input",
-        str(paks_dir),
-        "--output",
-        str(export_dir),
-        "--game",
-        args.game_version,
-        "--key",
-        "<redacted>",
-        "--format",
-        export_format,
-        "--yes",
-    ]
-    if mappings_path:
-        cmd.extend(["--mappings", str(mappings_path)])
-        redacted_cmd.extend(["--mappings", str(mappings_path)])
-    for pattern in package_patterns:
-        cmd.extend(["--package", pattern])
-        redacted_cmd.extend(["--package", pattern])
-    if args.verbose:
-        cmd.append("--verbose")
-        redacted_cmd.append("--verbose")
-
-    return_code, stdout, stderr = run_cmd_capture_redacted(cmd, redacted_cmd, check=False)
+    client = Cue4ParseClient(cue4parse)
+    result = client.export_asset(
+        paks_dir=paks_dir,
+        output_dir=export_dir,
+        package_patterns=package_patterns,
+        aes_key=aes_key,
+        mappings=mappings_path,
+        game_version=args.game_version,
+        export_format=export_format,
+        verbose=args.verbose,
+        check=False,
+    )
+    return_code, stdout, stderr = result.returncode, result.stdout, result.stderr
     fallback_used = False
     if return_code != 0 and export_format == "json" and args.raw_fallback:
         fallback_used = True
         export_format = "raw"
-        raw_cmd = list(cmd)
-        raw_redacted_cmd = list(redacted_cmd)
-        raw_cmd[raw_cmd.index("--format") + 1] = "raw"
-        raw_redacted_cmd[raw_redacted_cmd.index("--format") + 1] = "raw"
-        return_code, fallback_stdout, fallback_stderr = run_cmd_capture_redacted(raw_cmd, raw_redacted_cmd, check=False)
+        fallback_result = client.export_asset(
+            paks_dir=paks_dir,
+            output_dir=export_dir,
+            package_patterns=package_patterns,
+            aes_key=aes_key,
+            mappings=mappings_path,
+            game_version=args.game_version,
+            export_format=export_format,
+            verbose=args.verbose,
+            check=False,
+        )
+        return_code, fallback_stdout, fallback_stderr = (
+            fallback_result.returncode,
+            fallback_result.stdout,
+            fallback_result.stderr,
+        )
         stdout = f"{stdout}\n--- raw fallback stdout ---\n{fallback_stdout}"
         stderr = f"{stderr}\n--- raw fallback stderr ---\n{fallback_stderr}"
     if return_code != 0:
@@ -834,6 +771,7 @@ def cmd_prepare_bandage_speed_mod(args: argparse.Namespace) -> int:
 
 
 def cmd_pack_iostore_mod(args: argparse.Namespace) -> int:
+    validate_package_mode("iostore")
     input_dir = Path(args.input_dir)
     output_pak = Path(args.output_pak)
     if not input_dir.exists():
@@ -861,10 +799,8 @@ def cmd_pack_iostore_mod(args: argparse.Namespace) -> int:
 
     if args.install_to_mods:
         mods_dir = Path(args.install_to_mods)
-        mods_dir.mkdir(parents=True, exist_ok=True)
-        for output_file in [output_pak, output_pak.with_suffix(".ucas"), output_utoc]:
-            copy_file(output_file, mods_dir / output_file.name)
-            print(f"Installed IoStore file to: {mods_dir / output_file.name}")
+        for target in install_outputs([output_pak, output_pak.with_suffix(".ucas"), output_utoc], mods_dir):
+            print(f"Installed IoStore file to: {target}")
 
     print(f"Packed IoStore mod files: {output_pak}, {output_pak.with_suffix('.ucas')}, {output_utoc}")
     return 0
@@ -1091,7 +1027,7 @@ def cmd_restore_mods(args: argparse.Namespace) -> int:
         raise FileNotFoundError(f"Backup dir not found: {backup_dir}")
     mods_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.clear_existing:
+    if getattr(args, "clear_existing", False):
         for item in mods_dir.iterdir():
             if item.is_file():
                 item.unlink()
@@ -1119,22 +1055,17 @@ def cmd_build_install(args: argparse.Namespace) -> int:
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
     config = json.loads(config_path.read_text(encoding="utf-8"))
+    build_config = parse_build_config(config, config_path)
 
-    input_dir = resolve_config_path(config["input_dir"], config_path, "input_dir")
-    output_pak = resolve_config_path(config["output_pak"], config_path, "output_pak")
-    if "mods_dir" in config:
-        mods_dir = resolve_config_path(config["mods_dir"], config_path, "mods_dir")
-    else:
-        mods_dir = DEFAULT_GAME_MODS_DIR
-    mount_point = resolve_config_string(str(config.get("mount_point", "../../../")), config_path, "mount_point")
-    version = resolve_config_string(str(config.get("version", "V11")), config_path, "version")
-    compression = resolve_config_string(str(config.get("compression", "")), config_path, "compression")
+    input_dir = build_config.input_dir
+    output_pak = build_config.output_pak
+    mods_dir = build_config.mods_dir
+    mount_point = build_config.mount_point
+    version = build_config.version
+    compression = build_config.compression
 
     if args.backup_first:
-        if "backup_dir" in config:
-            backup_root = resolve_config_path(config["backup_dir"], config_path, "backup_dir")
-        else:
-            backup_root = output_pak.parent / "mods_backups"
+        backup_root = build_config.backup_dir or output_pak.parent / "mods_backups"
         backup_args = argparse.Namespace(mods_dir=str(mods_dir), backup_dir=str(backup_root))
         cmd_backup_mods(backup_args)
 
@@ -1446,6 +1377,20 @@ def prepare_recipe_variant(
     elif recipe.workflow == "sweet_potato":
         args = argparse.Namespace(**common)
         cmd_prepare_sweet_potato_json_mod(args)
+    elif recipe.workflow == "bandage_speed":
+        args = argparse.Namespace(
+            project_dir=str(project_dir),
+            staged_root=str(variant_staged_dir),
+            target_duration=multiplier,
+            vanilla_duration=recipe.vanilla_duration,
+            vanilla_health_per_tick=recipe.vanilla_health_per_tick,
+            target_health_per_tick=recipe.target_health_per_tick,
+            report_name=report_path.stem,
+            paks_dir="",
+            unreal_version="UE5_6",
+            retoc_path="",
+        )
+        cmd_prepare_bandage_speed_mod(args)
     else:
         raise ValueError(f"Unsupported recipe workflow: {recipe.workflow}")
     return report_path
@@ -1474,6 +1419,8 @@ def expected_recipe_path_fragments(recipe: ModRecipe) -> list[str]:
         return ["Pepper"]
     if recipe.workflow == "sweet_potato":
         return ["Potato"]
+    if recipe.workflow == "bandage_speed":
+        return ["CT_Alchemy_GE_Values"]
     if recipe.workflow == "bundle":
         fragments = []
         for included_slug in recipe.included_mods:
@@ -1481,6 +1428,23 @@ def expected_recipe_path_fragments(recipe: ModRecipe) -> list[str]:
             fragments.extend(expected_recipe_path_fragments(included_recipe))
         return fragments
     return []
+
+
+def validate_bundle_metadata(recipe: ModRecipe) -> None:
+    if recipe.workflow != "bundle":
+        return
+    covered = {item.strip().lower() for item in recipe.nexus.covered}
+    if not covered:
+        return
+    missing = []
+    for included_slug in recipe.included_mods:
+        included_recipe = load_recipe(workspace_root() / "mods" / included_slug)
+        if included_recipe.display_name.lower() not in covered:
+            missing.append(included_recipe.display_name)
+    if missing:
+        raise ValueError(
+            "Bundle nexus.covered is missing included mod(s): " + ", ".join(missing)
+        )
 
 
 def validate_variant_outputs(recipe: ModRecipe, variant_staged_dir: Path, generated_root: Path, output_pak: Path) -> dict:
@@ -1531,20 +1495,18 @@ def validate_variant_outputs(recipe: ModRecipe, variant_staged_dir: Path, genera
 def cmd_build_mod(args: argparse.Namespace) -> int:
     project_dir = Path(args.project_dir)
     recipe = load_recipe(project_dir)
+    validate_bundle_metadata(recipe)
     config_path = find_project_config(project_dir, recipe.slug, args.config)
     config = json.loads(config_path.read_text(encoding="utf-8"))
+    build_config = parse_build_config(config, config_path)
 
-    input_dir = resolve_config_path(config["input_dir"], config_path, "input_dir")
-    output_pak = resolve_config_path(config["output_pak"], config_path, "output_pak")
-    config_mods_dir = resolve_config_path(config.get("mods_dir", str(DEFAULT_GAME_MODS_DIR)), config_path, "mods_dir")
-    backup_root = resolve_config_path(
-        config.get("backup_dir", str(output_pak.parent / "mods_backups")),
-        config_path,
-        "backup_dir",
-    )
-    mount_point = resolve_config_string(str(config.get("mount_point", "../../../")), config_path, "mount_point")
-    version = resolve_config_string(str(config.get("version", "V11")), config_path, "version")
-    compression = resolve_config_string(str(config.get("compression", "")), config_path, "compression")
+    input_dir = build_config.input_dir
+    output_pak = build_config.output_pak
+    config_mods_dir = build_config.mods_dir
+    backup_root = build_config.backup_dir or output_pak.parent / "mods_backups"
+    mount_point = build_config.mount_point
+    version = build_config.version
+    compression = build_config.compression
     generated_root = output_pak.parent / "generated"
     install_target = args.install_target or recipe.install_target
     mods_dir = resolve_install_target(install_target, config_mods_dir)
@@ -1596,17 +1558,32 @@ def cmd_build_mod(args: argparse.Namespace) -> int:
             if removed:
                 print(f"Removed {removed} existing variant pak(s) from mods dir")
 
-        cmd_pack_pak(
-            argparse.Namespace(
-                input_dir=str(variant_staged_dir),
-                output_pak=str(variant_output),
-                mount_point=mount_point,
-                version=version,
-                compression=compression,
-                install_to_mods=str(mods_dir) if should_install else "",
-                repak_path=args.repak_path or "",
+        if validate_package_mode(recipe.package_mode) == "iostore":
+            cmd_pack_iostore_mod(
+                argparse.Namespace(
+                    input_dir=str(variant_staged_dir),
+                    output_pak=str(variant_output),
+                    mount_point=mount_point,
+                    pak_version=version,
+                    iostore_version="UE5_6",
+                    compression=compression,
+                    install_to_mods=str(mods_dir) if should_install else "",
+                    repak_path=args.repak_path or "",
+                    retoc_path="",
+                )
             )
-        )
+        else:
+            cmd_pack_pak(
+                argparse.Namespace(
+                    input_dir=str(variant_staged_dir),
+                    output_pak=str(variant_output),
+                    mount_point=mount_point,
+                    version=version,
+                    compression=compression,
+                    install_to_mods=str(mods_dir) if should_install else "",
+                    repak_path=args.repak_path or "",
+                )
+            )
 
         validation = {}
         if recipe.validate_outputs and not args.no_validate:
@@ -1614,7 +1591,10 @@ def cmd_build_mod(args: argparse.Namespace) -> int:
 
         package_path = ""
         if recipe.package_variants and not args.no_package:
-            package_path = str(package_pak_variant(variant_output))
+            if recipe.package_mode == "iostore":
+                package_path = str(package_iostore_variant(variant_output))
+            else:
+                package_path = str(package_pak_variant(variant_output))
 
         report["variants"].append(
             {
@@ -1671,40 +1651,11 @@ def parse_required_list(raw: str, field_name: str) -> list[str]:
 
 
 def loot_row_filter_text(item: dict) -> str:
-    parts = [str(item.get("LootItem") or ""), str(item.get("LootTable") or "")]
-    return " ".join(parts).lower()
+    return json_loot_workflow.loot_row_filter_text(item)
 
 
 def scale_loot_rows(data: dict, multiplier: float, include_keywords: set[str], exclude_keywords: set[str]) -> list[dict]:
-    file_edits = []
-    for index, item in enumerate(data.get("LootData", [])):
-        if not isinstance(item, dict):
-            continue
-        if "Min" not in item or "Max" not in item:
-            continue
-        filter_text = loot_row_filter_text(item)
-        if include_keywords and not any(keyword in filter_text for keyword in include_keywords):
-            continue
-        if exclude_keywords and any(keyword in filter_text for keyword in exclude_keywords):
-            continue
-        old_min = int(item["Min"])
-        old_max = int(item["Max"])
-        new_min = scale_value(old_min, multiplier)
-        new_max = scale_value(old_max, multiplier)
-        item["Min"] = new_min
-        item["Max"] = new_max
-        file_edits.append(
-            {
-                "row_index": index,
-                "loot_item": item.get("LootItem"),
-                "loot_table": item.get("LootTable"),
-                "old_min": old_min,
-                "old_max": old_max,
-                "new_min": new_min,
-                "new_max": new_max,
-            }
-        )
-    return file_edits
+    return json_loot_workflow.scale_loot_rows(data, multiplier, include_keywords, exclude_keywords, scale_value)
 
 
 def cmd_prepare_boar_hide_json_mod(args: argparse.Namespace) -> int:
@@ -2285,6 +2236,7 @@ def cmd_init_mob_bounty(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Windrose reusable modding CLI")
+    parser.add_argument("--debug", action="store_true", help="Show Python tracebacks for unexpected errors")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init-project", help="Create standard mod project folders")
@@ -2885,7 +2837,7 @@ def main() -> int:
     load_local_env()
     parser = build_parser()
     args = parser.parse_args()
-    return args.func(args)
+    return run_with_error_handling(parser, lambda: args.func(args), debug=args.debug)
 
 
 if __name__ == "__main__":

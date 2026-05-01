@@ -10,8 +10,16 @@ Reusable command-line helpers for investigating Windrose Unreal Engine assets an
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
+- Poetry for repeatable test/development dependencies
 - Read access to Windrose `R5/Content/Paks`
+
+Set up the Python test environment:
+
+```powershell
+python -m pip install --user poetry
+python -m poetry install
+```
 
 ## Suggested Project Layout
 
@@ -108,11 +116,10 @@ Current inspected values:
 Prepare and package the Fast Bandages cooked asset override:
 
 ```powershell
-python ".\modding_tools\windrose_mod_cli.py" prepare-bandage-speed-mod --project-dir ".\mods\fast-bandages"
-python ".\modding_tools\windrose_mod_cli.py" pack-iostore-mod --input-dir ".\mods\fast-bandages\input\staged" --output-pak ".\mods\fast-bandages\output\FastBandages_P.pak" --install-to-mods "$env:WINDROSE_MODS_DIR"
+python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\fast-bandages" --backup-first
 ```
 
-Cooked asset mods that override Zen/IoStore assets should be installed as the full `.pak` / `.ucas` / `.utoc` trio.
+Cooked asset mods use recipe `package_mode: "iostore"` and should be installed as the full `.pak` / `.ucas` / `.utoc` trio.
 
 Build a recipe-driven mod, including variants and zip packages:
 
@@ -183,16 +190,26 @@ Run automated tests:
 powershell -ExecutionPolicy Bypass -File ".\modding_tools\scripts\run_tests.ps1"
 ```
 
+Or directly through Poetry:
+
+```powershell
+python -m poetry run pytest
+```
+
 The suite covers:
 
 - `.local/.env` loading behavior
 - token/env config expansion and path resolution
+- parser wiring for important subcommands
+- external tool argv construction for `repak`, `retoc`, and `cue4parse`
 - template/bootstrap generation
-- build/install config wiring
+- recipe, variant, pak, and IoStore build wiring
 - boar JSON extraction/edit logic
 
 ## Notes
 
+- The current helper scripts and bundled third-party tooling are Windows-first because Windrose, Steam paths, PowerShell scripts, and the downloaded toolchain are Windows-oriented today.
+- The Python modules are kept as portable as practical, but real `repak`, `retoc`, and `cue4parse` integration should be treated as Windows-only until tested elsewhere.
 - This toolkit discovers and correlates Unreal object paths in containers.
 - It can inspect cooked `.uasset` data through `inspect-cooked-asset`, but it does not yet perform general `.uasset` authoring workflows.
 - Plugin-mounted assets are common; do not assume only `/Game/...` paths.

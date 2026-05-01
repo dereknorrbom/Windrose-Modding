@@ -95,6 +95,9 @@ def test_cue4parse_package_patterns_include_wildcard():
 
 
 def test_cmd_inspect_cooked_asset_exports_json_with_mappings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from windrose_cli.tools import cue4parse
+    from windrose_cli.tools.process import ProcessResult
+
     paks_dir = tmp_path / "Paks"
     paks_dir.mkdir()
     mappings = tmp_path / "Windrose.usmap"
@@ -102,7 +105,7 @@ def test_cmd_inspect_cooked_asset_exports_json_with_mappings(tmp_path: Path, mon
     output = tmp_path / "inspection.json"
     captured: dict[str, list[str]] = {}
 
-    def fake_run_cmd_capture_redacted(cmd, redacted_cmd, cwd=None, check=True):
+    def fake_run(cmd, cwd=None, check=True, redacted_cmd=None):
         captured["cmd"] = cmd
         captured["redacted_cmd"] = redacted_cmd
         export_dir = Path(cmd[cmd.index("--output") + 1])
@@ -121,10 +124,10 @@ def test_cmd_inspect_cooked_asset_exports_json_with_mappings(tmp_path: Path, mon
             ),
             encoding="utf-8-sig",
         )
-        return 0, "", "Processed 1 packages"
+        return ProcessResult(0, "", "Processed 1 packages")
 
     monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("cue4parse.exe"))
-    monkeypatch.setattr(cli, "run_cmd_capture_redacted", fake_run_cmd_capture_redacted)
+    monkeypatch.setattr(cue4parse, "run", fake_run)
     monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
     monkeypatch.setenv("WINDROSE_AES_KEY", "0xsecret")
     monkeypatch.setenv("WINDROSE_USMAP_PATH", str(mappings))
@@ -155,24 +158,27 @@ def test_cmd_inspect_cooked_asset_exports_json_with_mappings(tmp_path: Path, mon
 
 
 def test_cmd_inspect_cooked_asset_raw_fallback_scans_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from windrose_cli.tools import cue4parse
+    from windrose_cli.tools.process import ProcessResult
+
     paks_dir = tmp_path / "Paks"
     paks_dir.mkdir()
     output = tmp_path / "inspection.json"
     calls: list[str] = []
 
-    def fake_run_cmd_capture_redacted(cmd, redacted_cmd, cwd=None, check=True):
+    def fake_run(cmd, cwd=None, check=True, redacted_cmd=None):
         export_format = cmd[cmd.index("--format") + 1]
         calls.append(export_format)
         if export_format == "json":
-            return 1, "", "Could not load standard asset"
+            return ProcessResult(1, "", "Could not load standard asset")
         export_dir = Path(cmd[cmd.index("--output") + 1])
         raw_asset = export_dir / "R5" / "Content" / "Gameplay" / "ItemsLogic" / "Consumables" / "CT_Alchemy_GE_Values.uasset"
         raw_asset.parent.mkdir(parents=True, exist_ok=True)
         raw_asset.write_bytes(b"\x00Alchemy_Bandages_T01_Duration\x00")
-        return 0, "", "Processed 1 packages"
+        return ProcessResult(0, "", "Processed 1 packages")
 
     monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("cue4parse.exe"))
-    monkeypatch.setattr(cli, "run_cmd_capture_redacted", fake_run_cmd_capture_redacted)
+    monkeypatch.setattr(cue4parse, "run", fake_run)
     monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
     monkeypatch.setenv("WINDROSE_AES_KEY", "0xsecret")
 
@@ -1358,3 +1364,192 @@ def test_cmd_init_mob_bounty_scaffolds_recipe_and_docs(tmp_path: Path, monkeypat
     assert recipe["workflow"] == "mob_rss"
     assert recipe["mob_keywords"] == ["goat"]
     assert (project / "docs" / "NEXUS_DESCRIPTION.txt").exists()
+
+
+@pytest.mark.parametrize(
+    "argv,expected_func",
+    [
+        (["tools-info"], cli.cmd_tools_info),
+        (["search-paths", "--paks-dir", "paks", "--contains", "boar", "--output", "out.json"], cli.cmd_search_paths),
+        (["loot-manifest", "--paks-dir", "paks", "--mob-keyword", "boar", "--output", "out.json"], cli.cmd_loot_manifest),
+        (["backup-mods", "--mods-dir", "mods", "--backup-dir", "backup"], cli.cmd_backup_mods),
+        (["restore-mods", "--mods-dir", "mods", "--backup-dir", "backup"], cli.cmd_restore_mods),
+        (["unpack-iostore", "--utoc", "pakchunk0.utoc", "--output-dir", "out"], cli.cmd_unpack_iostore),
+        (["build-mod", "--project-dir", "mods/boar-loot"], cli.cmd_build_mod),
+        (
+            [
+                "inspect-cooked-asset",
+                "--asset-path",
+                "/Game/R5/Content/Test",
+                "--paks-dir",
+                "paks",
+                "--aes-key",
+                "0xabc",
+            ],
+            cli.cmd_inspect_cooked_asset,
+        ),
+        (["prepare-bandage-speed-mod", "--project-dir", "mods/fast-bandages"], cli.cmd_prepare_bandage_speed_mod),
+        (
+            ["pack-iostore-mod", "--input-dir", "staged", "--output-pak", "out/Test_P.pak"],
+            cli.cmd_pack_iostore_mod,
+        ),
+    ],
+)
+def test_parser_smoke_wires_uncovered_commands(argv, expected_func):
+    args = cli.build_parser().parse_args(argv)
+    assert args.func is expected_func
+
+
+def test_cmd_tools_info_outputs_machine_readable_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    tools_dir = tmp_path / "bin"
+    tools_dir.mkdir()
+    (tools_dir / "repak.exe").write_text("", encoding="utf-8")
+    monkeypatch.setattr(cli, "bin_dir", lambda: tools_dir)
+
+    assert cli.cmd_tools_info(argparse.Namespace()) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["repak.exe"] == str(tools_dir / "repak.exe")
+    assert payload["retoc.exe"] == ""
+
+
+def test_backup_restore_mods_roundtrip(tmp_path: Path):
+    mods_dir = tmp_path / "mods"
+    backup_root = tmp_path / "backups"
+    mods_dir.mkdir()
+    (mods_dir / "Example_P.pak").write_text("original", encoding="utf-8")
+
+    assert cli.cmd_backup_mods(argparse.Namespace(mods_dir=str(mods_dir), backup_dir=str(backup_root))) == 0
+    (mods_dir / "Example_P.pak").write_text("changed", encoding="utf-8")
+    backup_dir = next(backup_root.iterdir())
+
+    assert cli.cmd_restore_mods(argparse.Namespace(mods_dir=str(mods_dir), backup_dir=str(backup_dir))) == 0
+    assert (mods_dir / "Example_P.pak").read_text(encoding="utf-8") == "original"
+
+
+def test_cmd_unpack_iostore_uses_retoc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    utoc = tmp_path / "mod.utoc"
+    utoc.write_bytes(b"utoc")
+    output_dir = tmp_path / "unpacked"
+    calls = []
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("retoc.exe"))
+    monkeypatch.setattr(cli, "run_cmd", lambda cmd: calls.append(cmd))
+
+    args = argparse.Namespace(utoc=str(utoc), output_dir=str(output_dir), retoc_path="")
+    assert cli.cmd_unpack_iostore(args) == 0
+    assert calls == [[str(Path("retoc.exe")), "unpack", str(utoc), str(output_dir)]]
+
+
+def test_load_recipe_accepts_bandage_speed_iostore_workflow(tmp_path: Path):
+    project = tmp_path / "mods" / "fast-bandages"
+    (project / "docs").mkdir(parents=True)
+    (project / "docs" / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Fast Bandages",
+                "slug": "fast-bandages",
+                "pak_name": "FastBandages",
+                "workflow": "bandage_speed",
+                "package_mode": "iostore",
+                "variants": [15.0],
+                "default_install_variant": 15.0,
+                "install_target": "single-player",
+                "report_name": "bandage_speed_edit_report",
+            }
+        ),
+        encoding="utf-8",
+    )
+    recipe = cli.load_recipe(project)
+    assert recipe.workflow == "bandage_speed"
+    assert recipe.package_mode == "iostore"
+
+
+def test_package_iostore_variant_zips_output_trio(tmp_path: Path):
+    pak = tmp_path / "FastBandages_P_x15.pak"
+    pak.write_bytes(b"pak")
+    pak.with_suffix(".ucas").write_bytes(b"ucas")
+    pak.with_suffix(".utoc").write_bytes(b"utoc")
+
+    zip_path = cli.package_iostore_variant(pak)
+    assert zip_path.exists()
+
+
+def test_tool_clients_build_expected_external_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from windrose_cli.tools import cue4parse, repak, retoc
+    from windrose_cli.tools.process import ProcessResult
+
+    calls = []
+
+    def fake_run(cmd, cwd=None, check=True, redacted_cmd=None):
+        calls.append({"cmd": cmd, "redacted_cmd": redacted_cmd, "check": check})
+        return ProcessResult(0, "entry.json\n", "")
+
+    monkeypatch.setattr(repak, "run", fake_run)
+    monkeypatch.setattr(retoc, "run", fake_run)
+    monkeypatch.setattr(cue4parse, "run", fake_run)
+
+    repak.RepakClient(Path("repak.exe")).list_entries(tmp_path / "pakchunk0-Windows.pak", "0xsecret")
+    retoc.RetocClient(Path("retoc.exe")).to_zen(tmp_path / "Mod_P.pak", tmp_path / "Mod_P.utoc")
+    cue4parse.Cue4ParseClient(Path("cue4parse.exe")).export_asset(
+        paks_dir=tmp_path / "Paks",
+        output_dir=tmp_path / "exported",
+        package_patterns=["/Game/TestAsset.uasset"],
+        aes_key="0xsecret",
+        mappings=tmp_path / "Windrose.usmap",
+        check=False,
+    )
+
+    assert calls[0]["cmd"] == [
+        "repak.exe",
+        "--aes-key",
+        "0xsecret",
+        "list",
+        str(tmp_path / "pakchunk0-Windows.pak"),
+    ]
+    assert calls[1]["cmd"] == [
+        "retoc.exe",
+        "to-zen",
+        str(tmp_path / "Mod_P.pak"),
+        str(tmp_path / "Mod_P.utoc"),
+        "--version",
+        "UE5_6",
+    ]
+    assert "--mappings" in calls[2]["cmd"]
+    assert "/Game/TestAsset.uasset" in calls[2]["cmd"]
+    assert calls[2]["redacted_cmd"][calls[2]["redacted_cmd"].index("--key") + 1] == "<redacted>"
+
+
+def test_validate_bundle_metadata_detects_missing_covered_mod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from windrose_cli.recipes import NexusMetadata
+
+    workspace = tmp_path / "repo"
+    included = workspace / "mods" / "goat-bounty" / "docs"
+    included.mkdir(parents=True)
+    (included / "mod_recipe.json").write_text(
+        json.dumps(
+            {
+                "display_name": "Goat Bounty",
+                "slug": "goat-bounty",
+                "pak_name": "GoatBounty",
+                "workflow": "mob_rss",
+                "mob_keywords": ["goat"],
+                "report_name": "goat_loot_edit_report",
+                "variants": [2],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "workspace_root", lambda: workspace)
+    recipe = cli.ModRecipe(
+        display_name="Windrose Bounty",
+        slug="windrose-bounty",
+        pak_name="WindroseBounty",
+        workflow="bundle",
+        variants=[2.0],
+        default_install_variant=None,
+        install_target="custom",
+        report_name="bundle_report",
+        included_mods=["goat-bounty"],
+        nexus=NexusMetadata(summary="", covered=["Other Bounty"]),
+    )
+    with pytest.raises(ValueError, match="Goat Bounty"):
+        cli.validate_bundle_metadata(recipe)

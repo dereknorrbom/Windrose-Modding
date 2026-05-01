@@ -6,8 +6,17 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_WORKFLOWS = {"mob_rss", "boar_resources", "cayenne_pepper", "sweet_potato", "loot_table_items", "bundle"}
+SUPPORTED_WORKFLOWS = {
+    "mob_rss",
+    "boar_resources",
+    "cayenne_pepper",
+    "sweet_potato",
+    "loot_table_items",
+    "bundle",
+    "bandage_speed",
+}
 SUPPORTED_INSTALL_TARGETS = {"single-player", "multiplayer", "dedicated", "custom"}
+SUPPORTED_PACKAGE_MODES = {"pak", "iostore"}
 
 
 @dataclass(frozen=True)
@@ -36,6 +45,10 @@ class ModRecipe:
     item_exclude_keywords: list[str] = field(default_factory=list)
     resource_types: list[str] = field(default_factory=list)
     included_mods: list[str] = field(default_factory=list)
+    package_mode: str = "pak"
+    vanilla_duration: float = 30.0
+    vanilla_health_per_tick: float = 15.0
+    target_health_per_tick: float = 0.0
     package_variants: bool = True
     validate_outputs: bool = True
     nexus: NexusMetadata = field(default_factory=lambda: NexusMetadata(summary=""))
@@ -119,6 +132,10 @@ def parse_recipe(raw: dict[str, Any]) -> ModRecipe:
         item_exclude_keywords=_as_list(raw.get("item_exclude_keywords"), "item_exclude_keywords"),
         resource_types=_as_list(raw.get("resource_types"), "resource_types"),
         included_mods=_as_list(raw.get("included_mods"), "included_mods"),
+        package_mode=str(raw.get("package_mode", "pak")).strip() or "pak",
+        vanilla_duration=float(raw.get("vanilla_duration", 30.0)),
+        vanilla_health_per_tick=float(raw.get("vanilla_health_per_tick", 15.0)),
+        target_health_per_tick=float(raw.get("target_health_per_tick", 0.0)),
         package_variants=bool(raw.get("package_variants", True)),
         validate_outputs=bool(raw.get("validate_outputs", True)),
         nexus=NexusMetadata(
@@ -151,6 +168,14 @@ def validate_recipe(recipe: ModRecipe) -> None:
         raise ValueError("loot_table_items recipes require item_include_keywords.")
     if recipe.workflow == "bundle" and not recipe.included_mods:
         raise ValueError("bundle recipes require included_mods.")
+    if recipe.package_mode not in SUPPORTED_PACKAGE_MODES:
+        raise ValueError(f"Unsupported package_mode: {recipe.package_mode}")
+    if recipe.workflow == "bandage_speed" and recipe.package_mode != "iostore":
+        raise ValueError("bandage_speed recipes require package_mode 'iostore'.")
+    if recipe.workflow == "bandage_speed" and recipe.vanilla_duration <= 0:
+        raise ValueError("bandage_speed recipes require vanilla_duration > 0.")
+    if recipe.workflow == "bandage_speed" and recipe.vanilla_health_per_tick <= 0:
+        raise ValueError("bandage_speed recipes require vanilla_health_per_tick > 0.")
 
 
 def write_recipe(path: Path, recipe: dict[str, Any]) -> None:
