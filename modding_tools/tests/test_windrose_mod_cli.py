@@ -87,6 +87,250 @@ def test_cmd_pack_pak_filters_scaffold_placeholders(tmp_path: Path, monkeypatch:
     assert cli.cmd_pack_pak(args) == 0
 
 
+def test_cue4parse_package_patterns_include_wildcard():
+    patterns = cli.cue4parse_package_patterns("/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values")
+    assert "/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values" in patterns
+    assert "Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uasset" in patterns
+    assert "*CT_Alchemy_GE_Values*" in patterns
+
+
+def test_cmd_inspect_cooked_asset_exports_json_with_mappings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    paks_dir = tmp_path / "Paks"
+    paks_dir.mkdir()
+    mappings = tmp_path / "Windrose.usmap"
+    mappings.write_bytes(b"usmap")
+    output = tmp_path / "inspection.json"
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_cmd_capture_redacted(cmd, redacted_cmd, cwd=None, check=True):
+        captured["cmd"] = cmd
+        captured["redacted_cmd"] = redacted_cmd
+        export_dir = Path(cmd[cmd.index("--output") + 1])
+        asset_json = export_dir / "R5" / "Content" / "Gameplay" / "ItemsLogic" / "Consumables" / "CT_Alchemy_GE_Values.json"
+        asset_json.parent.mkdir(parents=True, exist_ok=True)
+        asset_json.write_text(
+            json.dumps(
+                [
+                    {
+                        "Type": "CurveTable",
+                        "Rows": {
+                            "Alchemy_Bandages_T01_Duration": {"Keys": [{"Time": 1.0, "Value": 30.0}]}
+                        },
+                    }
+                ]
+            ),
+            encoding="utf-8-sig",
+        )
+        return 0, "", "Processed 1 packages"
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("cue4parse.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture_redacted", fake_run_cmd_capture_redacted)
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+    monkeypatch.setenv("WINDROSE_AES_KEY", "0xsecret")
+    monkeypatch.setenv("WINDROSE_USMAP_PATH", str(mappings))
+
+    args = argparse.Namespace(
+        asset_path="/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values",
+        package_pattern=[],
+        paks_dir="",
+        aes_key="",
+        mappings="",
+        output=str(output),
+        export_dir="",
+        game_version="GAME_UE5_LATEST",
+        format="json",
+        raw_fallback=True,
+        scan_text=[],
+        no_include_data=False,
+        verbose=False,
+        cue4parse_path="",
+    )
+    assert cli.cmd_inspect_cooked_asset(args) == 0
+    assert "--mappings" in captured["cmd"]
+    assert "0xsecret" not in captured["redacted_cmd"]
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["mappings"] == str(mappings)
+    assert report["exported_json_count"] == 1
+    assert report["exports"][0]["data"][0]["Rows"]["Alchemy_Bandages_T01_Duration"]["Keys"][0]["Value"] == 30.0
+
+
+def test_cmd_inspect_cooked_asset_raw_fallback_scans_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    paks_dir = tmp_path / "Paks"
+    paks_dir.mkdir()
+    output = tmp_path / "inspection.json"
+    calls: list[str] = []
+
+    def fake_run_cmd_capture_redacted(cmd, redacted_cmd, cwd=None, check=True):
+        export_format = cmd[cmd.index("--format") + 1]
+        calls.append(export_format)
+        if export_format == "json":
+            return 1, "", "Could not load standard asset"
+        export_dir = Path(cmd[cmd.index("--output") + 1])
+        raw_asset = export_dir / "R5" / "Content" / "Gameplay" / "ItemsLogic" / "Consumables" / "CT_Alchemy_GE_Values.uasset"
+        raw_asset.parent.mkdir(parents=True, exist_ok=True)
+        raw_asset.write_bytes(b"\x00Alchemy_Bandages_T01_Duration\x00")
+        return 0, "", "Processed 1 packages"
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("cue4parse.exe"))
+    monkeypatch.setattr(cli, "run_cmd_capture_redacted", fake_run_cmd_capture_redacted)
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+    monkeypatch.setenv("WINDROSE_AES_KEY", "0xsecret")
+
+    args = argparse.Namespace(
+        asset_path="/Game/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values",
+        package_pattern=[],
+        paks_dir="",
+        aes_key="",
+        mappings="",
+        output=str(output),
+        export_dir="",
+        game_version="GAME_UE5_LATEST",
+        format="json",
+        raw_fallback=True,
+        scan_text=["Alchemy_Bandages_T01_Duration"],
+        no_include_data=True,
+        verbose=False,
+        cue4parse_path="",
+    )
+    assert cli.cmd_inspect_cooked_asset(args) == 0
+    assert calls == ["json", "raw"]
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["raw_fallback_used"] is True
+    assert report["exports"][0]["string_hits"][0]["term"] == "Alchemy_Bandages_T01_Duration"
+
+
+def test_patch_bandage_curve_asset_preserves_total_healing(tmp_path: Path):
+    import struct
+
+    source = tmp_path / "CT_Alchemy_GE_Values.uasset"
+    output = tmp_path / "staged" / "CT_Alchemy_GE_Values.uasset"
+    source.write_bytes(b"prefix" + struct.pack("<f", 15.0) + b"middle" + struct.pack("<f", 30.0) + b"suffix")
+
+    edits = cli.patch_bandage_curve_asset(
+        source,
+        output,
+        vanilla_duration=30.0,
+        target_duration=15.0,
+        vanilla_health_per_tick=15.0,
+        target_health_per_tick=30.0,
+    )
+
+    patched = output.read_bytes()
+    assert edits == [
+        {"label": "Alchemy_Bandages_T01_Duration", "offset": 16, "old_value": 30.0, "new_value": 15.0},
+        {"label": "Alchemy_Bandages_T01_HealthPerTick", "offset": 6, "old_value": 15.0, "new_value": 30.0},
+    ]
+    assert patched == b"prefix" + struct.pack("<f", 30.0) + b"middle" + struct.pack("<f", 15.0) + b"suffix"
+
+
+def test_patch_bandage_curve_asset_rejects_ambiguous_values(tmp_path: Path):
+    import struct
+
+    source = tmp_path / "CT_Alchemy_GE_Values.uasset"
+    output = tmp_path / "staged" / "CT_Alchemy_GE_Values.uasset"
+    source.write_bytes(struct.pack("<f", 15.0) + struct.pack("<f", 15.0) + struct.pack("<f", 30.0))
+
+    with pytest.raises(ValueError, match="Alchemy_Bandages_T01_HealthPerTick"):
+        cli.patch_bandage_curve_asset(
+            source,
+            output,
+            vanilla_duration=30.0,
+            target_duration=15.0,
+            vanilla_health_per_tick=15.0,
+            target_health_per_tick=30.0,
+        )
+
+
+def test_cmd_prepare_bandage_speed_mod_extracts_split_asset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import struct
+
+    project = tmp_path / "mods" / "fast-bandages"
+    (project / "docs").mkdir(parents=True)
+    paks_dir = tmp_path / "Paks"
+    paks_dir.mkdir()
+
+    def fake_extract(retoc_path, paks_dir_arg, output_dir, asset_filter, unreal_version):
+        assert asset_filter == "CT_Alchemy_GE_Values"
+        assert unreal_version == "UE5_6"
+        asset_dir = output_dir / "R5" / "Content" / "Gameplay" / "ItemsLogic" / "Consumables"
+        asset_dir.mkdir(parents=True)
+        (asset_dir / "CT_Alchemy_GE_Values.uasset").write_bytes(b"asset")
+        (asset_dir / "CT_Alchemy_GE_Values.uexp").write_bytes(
+            b"prefix" + struct.pack("<f", 15.0) + b"middle" + struct.pack("<f", 30.0) + b"suffix"
+        )
+
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("retoc.exe"))
+    monkeypatch.setattr(cli, "extract_legacy_asset_with_retoc", fake_extract)
+    monkeypatch.setenv("WINDROSE_PAKS_DIR", str(paks_dir))
+
+    args = argparse.Namespace(
+        project_dir=str(project),
+        staged_root="",
+        target_duration=15.0,
+        vanilla_duration=30.0,
+        vanilla_health_per_tick=15.0,
+        target_health_per_tick=0.0,
+        report_name="bandage_speed_edit_report",
+        paks_dir="",
+        unreal_version="UE5_6",
+        retoc_path="",
+    )
+    assert cli.cmd_prepare_bandage_speed_mod(args) == 0
+
+    staged = project / "input" / "staged" / "R5" / "Content" / "Gameplay" / "ItemsLogic" / "Consumables"
+    assert (staged / "CT_Alchemy_GE_Values.uasset").read_bytes() == b"asset"
+    patched = (staged / "CT_Alchemy_GE_Values.uexp").read_bytes()
+    assert struct.pack("<f", 30.0) in patched
+    assert struct.pack("<f", 15.0) in patched
+    report = json.loads((project / "docs" / "bandage_speed_edit_report.json").read_text(encoding="utf-8"))
+    assert report["target_duration"] == 15.0
+    assert report["target_health_per_tick"] == 30.0
+    assert report["output_uexp"].endswith("CT_Alchemy_GE_Values.uexp")
+
+
+def test_cmd_pack_iostore_mod_packs_converts_and_installs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    input_dir = tmp_path / "staged"
+    input_dir.mkdir()
+    output_pak = tmp_path / "output" / "FastBandages_P.pak"
+    install_dir = tmp_path / "install"
+    pack_calls = []
+    run_calls = []
+
+    def fake_pack(ns):
+        pack_calls.append(ns)
+        out = Path(ns.output_pak)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"pak")
+        return 0
+
+    def fake_run(cmd, cwd=None):
+        run_calls.append(cmd)
+        Path(cmd[3]).write_bytes(b"utoc")
+        Path(cmd[3]).with_suffix(".ucas").write_bytes(b"ucas")
+
+    monkeypatch.setattr(cli, "cmd_pack_pak", fake_pack)
+    monkeypatch.setattr(cli, "resolve_tool", lambda *_args, **_kwargs: Path("retoc.exe"))
+    monkeypatch.setattr(cli, "run_cmd", fake_run)
+
+    args = argparse.Namespace(
+        input_dir=str(input_dir),
+        output_pak=str(output_pak),
+        mount_point="../../../",
+        pak_version="V11",
+        iostore_version="UE5_6",
+        compression="",
+        install_to_mods=str(install_dir),
+        repak_path="",
+        retoc_path="",
+    )
+    assert cli.cmd_pack_iostore_mod(args) == 0
+    assert len(pack_calls) == 1
+    assert run_calls[0][1] == "to-zen"
+    assert (install_dir / "FastBandages_P.pak").read_bytes() == b"pak"
+    assert (install_dir / "FastBandages_P.ucas").read_bytes() == b"ucas"
+    assert (install_dir / "FastBandages_P.utoc").read_bytes() == b"utoc"
+
+
 def test_slug_and_pak_name_helpers():
     assert cli.slugify_mod_name("Better Boar Loot!!") == "better-boar-loot"
     assert cli.pak_name_from_mod_name("better boar loot") == "BetterBoarLoot"

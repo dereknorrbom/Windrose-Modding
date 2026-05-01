@@ -83,3 +83,21 @@ them from running from .pak, but should not be an issue for modding purposes.
 ## credits
 - [Archengius](https://github.com/Archengius): writing all of the asset conversion code
 - [LongerWarrior](https://github.com/LongerWarrior): debugging complex conversion issues and testing against many games
+
+# CUE4Parse.CLI
+
+`cue4parse.exe` is used by `windrose_mod_cli.py inspect-cooked-asset` for
+read-only cooked asset inspection. It lets the toolkit export selected Unreal
+assets to JSON without using FModel.
+
+Install/update it with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\modding_tools\scripts\install_toolchain.ps1"
+```
+
+Current pinned download:
+
+```text
+https://github.com/joric/CUE4Parse.CLI/releases/download/cli-0.1.5/CUE4Parse.CLI-0.1.5-Win64-bin.zip
+```

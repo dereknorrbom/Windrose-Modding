@@ -26,6 +26,17 @@ $retocZip = Join-Path $tmp "retoc.zip"
 Invoke-WebRequest -Uri "https://github.com/trumank/retoc/releases/latest/download/retoc_cli-x86_64-pc-windows-msvc.zip" -OutFile $retocZip
 tar -xf $retocZip -C $bin
 
+Write-Host "Downloading CUE4Parse.CLI..."
+$cue4parseZip = Join-Path $tmp "cue4parse-cli.zip"
+$cue4parseExtract = Join-Path $tmp "cue4parse-cli"
+Invoke-WebRequest -Uri "https://github.com/joric/CUE4Parse.CLI/releases/download/cli-0.1.5/CUE4Parse.CLI-0.1.5-Win64-bin.zip" -OutFile $cue4parseZip
+if (Test-Path $cue4parseExtract) {
+    Remove-Item -Recurse -Force $cue4parseExtract
+}
+New-Item -ItemType Directory -Path $cue4parseExtract -Force | Out-Null
+tar -xf $cue4parseZip -C $cue4parseExtract
+Copy-Item -LiteralPath (Join-Path $cue4parseExtract "cue4parse.exe") -Destination $bin -Force
+
 Write-Host "Downloading rust-u4pak..."
 $u4Zip = Join-Path $tmp "rust-u4pak.zip"
 $u4Extract = Join-Path $tmp "rust-u4pak"

@@ -24,3 +24,6 @@
 .DS_Store
 Thumbs.db
 **/docs/*_bundle_report*.json
+
+# Generated cooked asset staging
+mods/fast-bandages/input/staged/R5/
