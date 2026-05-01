@@ -1,0 +1,9 @@
+Fast Bandages staging instructions
+
+1) Generate the patched curve table:
+   python ".\modding_tools\windrose_mod_cli.py" prepare-bandage-speed-mod --project-dir ".\mods\fast-bandages"
+2) Confirm these files exist:
+   input/staged/R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uasset
+   input/staged/R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uexp
+3) Pack/install the IoStore trio:
+   python ".\modding_tools\windrose_mod_cli.py" pack-iostore-mod --input-dir ".\mods\fast-bandages\input\staged" --output-pak ".\mods\fast-bandages\output\FastBandages_P.pak" --install-to-mods "$env:WINDROSE_MODS_DIR"

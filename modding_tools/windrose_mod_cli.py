@@ -33,6 +33,7 @@ DEFAULT_GAME_MODS_DIR = Path(
 )
 PACK_IGNORE_FILE_NAMES = {".gitkeep"}
 CUE4PARSE_CLI_NAME = "cue4parse.exe"
+BANDAGE_CURVE_ASSET_REL = Path("R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values")
 BOAR_LEATHER_JSON_PATTERN = re.compile(
     r"^R5/Plugins/R5BusinessRules/Content/LootTables/Mobs/Rss/DA_LT_Mob_Boar(?:F|Mega)?_Leather(?:_[0-9]+)?\.json$"
 )
@@ -529,6 +530,94 @@ def binary_string_hits(path: Path, terms: list[str]) -> list[dict[str, object]]:
     return hits
 
 
+def find_all_bytes(blob: bytes, needle: bytes) -> list[int]:
+    offsets: list[int] = []
+    start = 0
+    while True:
+        found = blob.find(needle, start)
+        if found == -1:
+            return offsets
+        offsets.append(found)
+        start = found + 1
+
+
+def patch_single_float(blob: bytearray, old_value: float, new_value: float, label: str) -> dict[str, object]:
+    import struct
+
+    old_bytes = struct.pack("<f", old_value)
+    new_bytes = struct.pack("<f", new_value)
+    offsets = find_all_bytes(bytes(blob), old_bytes)
+    if len(offsets) != 1:
+        raise ValueError(
+            f"Expected exactly one {label} float value {old_value}, found {len(offsets)} offsets: {offsets}"
+        )
+    offset = offsets[0]
+    blob[offset : offset + 4] = new_bytes
+    return {"label": label, "offset": offset, "old_value": old_value, "new_value": new_value}
+
+
+def locate_single_float(blob: bytes, old_value: float, label: str) -> dict[str, object]:
+    import struct
+
+    old_bytes = struct.pack("<f", old_value)
+    offsets = find_all_bytes(blob, old_bytes)
+    if len(offsets) != 1:
+        raise ValueError(
+            f"Expected exactly one {label} float value {old_value}, found {len(offsets)} offsets: {offsets}"
+        )
+    return {"label": label, "offset": offsets[0], "old_value": old_value}
+
+
+def patch_bandage_curve_asset(
+    source_asset: Path,
+    output_asset: Path,
+    vanilla_duration: float,
+    target_duration: float,
+    vanilla_health_per_tick: float,
+    target_health_per_tick: float,
+) -> list[dict[str, object]]:
+    blob = bytearray(source_asset.read_bytes())
+    original_blob = bytes(blob)
+    edits = [
+        locate_single_float(original_blob, vanilla_duration, "Alchemy_Bandages_T01_Duration"),
+        locate_single_float(original_blob, vanilla_health_per_tick, "Alchemy_Bandages_T01_HealthPerTick"),
+    ]
+    for edit, new_value in zip(edits, [target_duration, target_health_per_tick], strict=True):
+        import struct
+
+        offset = int(edit["offset"])
+        blob[offset : offset + 4] = struct.pack("<f", new_value)
+        edit["new_value"] = new_value
+    output_asset.parent.mkdir(parents=True, exist_ok=True)
+    output_asset.write_bytes(blob)
+    return edits
+
+
+def extract_legacy_asset_with_retoc(
+    retoc_path: Path,
+    paks_dir: Path,
+    output_dir: Path,
+    asset_filter: str,
+    unreal_version: str,
+) -> None:
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    run_cmd(
+        [
+            str(retoc_path),
+            "to-legacy",
+            str(paks_dir),
+            str(output_dir),
+            "--filter",
+            asset_filter,
+            "--version",
+            unreal_version,
+            "--no-shaders",
+        ]
+    )
+
+
 def cmd_inspect_cooked_asset(args: argparse.Namespace) -> int:
     cue4parse = resolve_tool(CUE4PARSE_CLI_NAME, args.cue4parse_path)
     paks_dir_raw = args.paks_dir or os.environ.get("WINDROSE_PAKS_DIR", "")
@@ -667,6 +756,117 @@ def cmd_inspect_cooked_asset(args: argparse.Namespace) -> int:
         print(f"Wrote cooked asset inspection: {output_path}")
     else:
         print(text)
+    return 0
+
+
+def cmd_prepare_bandage_speed_mod(args: argparse.Namespace) -> int:
+    retoc = resolve_tool("retoc.exe", args.retoc_path)
+    paks_dir_raw = args.paks_dir or os.environ.get("WINDROSE_PAKS_DIR", "")
+    if not paks_dir_raw:
+        raise ValueError("Pass --paks-dir or set WINDROSE_PAKS_DIR.")
+    paks_dir = Path(paks_dir_raw)
+    if not paks_dir.exists():
+        raise FileNotFoundError(f"Paks dir not found: {paks_dir}")
+
+    project_dir = Path(args.project_dir)
+    staged_root = Path(args.staged_root) if args.staged_root else project_dir / "input" / "staged"
+    source_root = project_dir / "output" / "generated" / "legacy_source"
+
+    vanilla_duration = float(args.vanilla_duration)
+    target_duration = float(args.target_duration)
+    vanilla_health_per_tick = float(args.vanilla_health_per_tick)
+    if target_duration <= 0:
+        raise ValueError("--target-duration must be greater than zero.")
+    target_health_per_tick = float(args.target_health_per_tick) if args.target_health_per_tick else (
+        vanilla_health_per_tick * (vanilla_duration / target_duration)
+    )
+
+    extract_legacy_asset_with_retoc(
+        retoc,
+        paks_dir,
+        source_root,
+        "CT_Alchemy_GE_Values",
+        args.unreal_version,
+    )
+
+    source_asset_base = source_root / BANDAGE_CURVE_ASSET_REL
+    source_uasset = source_asset_base.with_suffix(".uasset")
+    source_uexp = source_asset_base.with_suffix(".uexp")
+    if not source_uasset.exists() or not source_uexp.exists():
+        raise FileNotFoundError(f"Expected split curve asset export not found under: {source_asset_base.parent}")
+
+    output_asset_base = staged_root / BANDAGE_CURVE_ASSET_REL
+    output_uasset = output_asset_base.with_suffix(".uasset")
+    output_uexp = output_asset_base.with_suffix(".uexp")
+    output_uasset.parent.mkdir(parents=True, exist_ok=True)
+    copy_file(source_uasset, output_uasset)
+    edits = patch_bandage_curve_asset(
+        source_uexp,
+        output_uexp,
+        vanilla_duration,
+        target_duration,
+        vanilla_health_per_tick,
+        target_health_per_tick,
+    )
+
+    report = {
+        "generated_utc": utc_now_iso(),
+        "project_dir": str(project_dir),
+        "staged_root": str(staged_root),
+        "paks_dir": str(paks_dir),
+        "source_uasset": str(source_uasset),
+        "source_uexp": str(source_uexp),
+        "output_uasset": str(output_uasset),
+        "output_uexp": str(output_uexp),
+        "vanilla_duration": vanilla_duration,
+        "target_duration": target_duration,
+        "vanilla_health_per_tick": vanilla_health_per_tick,
+        "target_health_per_tick": target_health_per_tick,
+        "tick_period_unchanged": 0.5,
+        "total_healing_policy": "Preserve vanilla total healing by increasing health per tick as duration decreases.",
+        "edits": edits,
+    }
+    report_path = project_dir / "docs" / f"{args.report_name}.json"
+    write_json(report_path, report)
+    print(f"Prepared fast bandage curve override in: {staged_root}")
+    print(f"Wrote report: {report_path}")
+    return 0
+
+
+def cmd_pack_iostore_mod(args: argparse.Namespace) -> int:
+    input_dir = Path(args.input_dir)
+    output_pak = Path(args.output_pak)
+    if not input_dir.exists():
+        raise FileNotFoundError(f"Input directory not found: {input_dir}")
+
+    for output_file in [output_pak, output_pak.with_suffix(".ucas"), output_pak.with_suffix(".utoc")]:
+        if output_file.exists():
+            output_file.unlink()
+
+    cmd_pack_pak(
+        argparse.Namespace(
+            input_dir=str(input_dir),
+            output_pak=str(output_pak),
+            mount_point=args.mount_point,
+            version=args.pak_version,
+            compression=args.compression,
+            install_to_mods="",
+            repak_path=args.repak_path,
+        )
+    )
+
+    retoc = resolve_tool("retoc.exe", args.retoc_path)
+    output_utoc = output_pak.with_suffix(".utoc")
+    run_cmd([str(retoc), "to-zen", str(output_pak), str(output_utoc), "--version", args.iostore_version])
+
+    if args.install_to_mods:
+        mods_dir = Path(args.install_to_mods)
+        mods_dir.mkdir(parents=True, exist_ok=True)
+        for output_file in [output_pak, output_pak.with_suffix(".ucas"), output_utoc]:
+            copy_file(output_file, mods_dir / output_file.name)
+            print(f"Installed IoStore file to: {mods_dir / output_file.name}")
+
+    print(f"Packed IoStore mod files: {output_pak}, {output_pak.with_suffix('.ucas')}, {output_utoc}")
     return 0
 
 
@@ -2232,6 +2432,44 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect_cooked.add_argument("--cue4parse-path", default="", help="Optional explicit cue4parse.exe path")
     p_inspect_cooked.set_defaults(func=cmd_inspect_cooked_asset)
 
+    p_prepare_bandage = sub.add_parser(
+        "prepare-bandage-speed-mod",
+        help="Prepare a patched bandage curve table override for faster healing",
+    )
+    p_prepare_bandage.add_argument("--project-dir", required=True, help="Mod project directory")
+    p_prepare_bandage.add_argument(
+        "--staged-root",
+        default="",
+        help="Optional staged output root. Defaults to <project_dir>/input/staged",
+    )
+    p_prepare_bandage.add_argument("--target-duration", type=float, default=15.0, help="Target bandage duration")
+    p_prepare_bandage.add_argument("--vanilla-duration", type=float, default=30.0, help="Expected vanilla duration")
+    p_prepare_bandage.add_argument(
+        "--vanilla-health-per-tick",
+        type=float,
+        default=15.0,
+        help="Expected vanilla health per tick",
+    )
+    p_prepare_bandage.add_argument(
+        "--target-health-per-tick",
+        type=float,
+        default=0.0,
+        help="Optional explicit target health per tick. Default preserves total healing.",
+    )
+    p_prepare_bandage.add_argument("--report-name", default="bandage_speed_edit_report", help="Report file stem")
+    p_prepare_bandage.add_argument(
+        "--paks-dir",
+        default="",
+        help="Path containing Windrose pak/ucas/utoc files. Optional if WINDROSE_PAKS_DIR is set.",
+    )
+    p_prepare_bandage.add_argument(
+        "--unreal-version",
+        default="UE5_6",
+        help="retoc Unreal version for to-legacy extraction. Defaults to UE5_6.",
+    )
+    p_prepare_bandage.add_argument("--retoc-path", default="", help="Optional explicit retoc.exe path")
+    p_prepare_bandage.set_defaults(func=cmd_prepare_bandage_speed_mod)
+
     p_tools = sub.add_parser("tools-info", help="Show installed toolkit executable paths")
     p_tools.set_defaults(func=cmd_tools_info)
 
@@ -2256,6 +2494,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pack.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
     p_pack.set_defaults(func=cmd_pack_pak)
+
+    p_pack_iostore = sub.add_parser("pack-iostore-mod", help="Pack staged cooked assets and convert to .pak/.ucas/.utoc")
+    p_pack_iostore.add_argument("--input-dir", required=True, help="Folder containing staged mod files")
+    p_pack_iostore.add_argument("--output-pak", required=True, help="Output .pak path")
+    p_pack_iostore.add_argument("--mount-point", default="../../../", help="Pak mount point")
+    p_pack_iostore.add_argument(
+        "--pak-version",
+        default="V11",
+        help="Intermediate pak version for repak. Common modern choices are V9-V11.",
+    )
+    p_pack_iostore.add_argument(
+        "--iostore-version",
+        default="UE5_6",
+        help="retoc Unreal version for to-zen conversion. Defaults to UE5_6.",
+    )
+    p_pack_iostore.add_argument(
+        "--compression",
+        default="",
+        help="Optional intermediate pak compression: Zlib, Gzip, Oodle, Zstd, LZ4",
+    )
+    p_pack_iostore.add_argument(
+        "--install-to-mods",
+        default="",
+        help="Optional target folder to copy .pak/.ucas/.utoc into",
+    )
+    p_pack_iostore.add_argument("--repak-path", default="", help="Optional explicit repak.exe path")
+    p_pack_iostore.add_argument("--retoc-path", default="", help="Optional explicit retoc.exe path")
+    p_pack_iostore.set_defaults(func=cmd_pack_iostore_mod)
 
     p_unpack_io = sub.add_parser("unpack-iostore", help="Unpack .utoc/.ucas with retoc")
     p_unpack_io.add_argument("--utoc", required=True, help="Path to input .utoc file")

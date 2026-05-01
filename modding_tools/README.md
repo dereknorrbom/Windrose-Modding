@@ -105,6 +105,15 @@ Current inspected values:
 - `Alchemy_Bandages_T01_TickPeriod` = `0.5`
 - `Alchemy_Bandages_T01_HealthPerTick` = `15.0`
 
+Prepare and package the Fast Bandages cooked asset override:
+
+```powershell
+python ".\modding_tools\windrose_mod_cli.py" prepare-bandage-speed-mod --project-dir ".\mods\fast-bandages"
+python ".\modding_tools\windrose_mod_cli.py" pack-iostore-mod --input-dir ".\mods\fast-bandages\input\staged" --output-pak ".\mods\fast-bandages\output\FastBandages_P.pak" --install-to-mods "$env:WINDROSE_MODS_DIR"
+```
+
+Cooked asset mods that override Zen/IoStore assets should be installed as the full `.pak` / `.ucas` / `.utoc` trio.
+
 Build a recipe-driven mod, including variants and zip packages:
 
 ```powershell
