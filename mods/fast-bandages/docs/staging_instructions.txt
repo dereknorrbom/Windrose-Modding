@@ -1,9 +1,12 @@
 Fast Bandages staging instructions
 
-1) Generate the patched curve table:
-   python ".\modding_tools\windrose_mod_cli.py" prepare-bandage-speed-mod --project-dir ".\mods\fast-bandages"
+1) Generate all recipe variants:
+   python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\fast-bandages" --install-multipliers "15"
 2) Confirm these files exist:
-   input/staged/R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uasset
-   input/staged/R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uexp
-3) Pack/install the IoStore trio:
-   python ".\modding_tools\windrose_mod_cli.py" pack-iostore-mod --input-dir ".\mods\fast-bandages\input\staged" --output-pak ".\mods\fast-bandages\output\FastBandages_P.pak" --install-to-mods "$env:WINDROSE_MODS_DIR"
+   output/generated/x1/staged/R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uasset
+   output/generated/x1/staged/R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uexp
+   output/generated/x15/staged/R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uasset
+   output/generated/x15/staged/R5/Content/Gameplay/ItemsLogic/Consumables/CT_Alchemy_GE_Values.uexp
+3) Install all three IoStore files for exactly one variant:
+   FastBandages_x1_P.pak / .ucas / .utoc for 1 second
+   FastBandages_x15_P.pak / .ucas / .utoc for 15 seconds

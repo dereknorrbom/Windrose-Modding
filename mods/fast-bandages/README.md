@@ -2,20 +2,21 @@
 
 Scaffolded Windrose mod project for `fast-bandages`.
 
-Fast Bandages is an experimental cooked-asset override that makes basic bandages complete their healing over 15 seconds instead of 30 seconds while preserving the same total healing.
+Fast Bandages is an experimental cooked-asset override that makes basic bandages complete their healing faster while preserving the same total healing. The recipe currently builds both a 15-second variant and a 1-second variant.
 
 The mod patches `CT_Alchemy_GE_Values`:
 
-- `Alchemy_Bandages_T01_Duration`: `30.0 -> 15.0`
-- `Alchemy_Bandages_T01_HealthPerTick`: `15.0 -> 30.0`
+- `Alchemy_Bandages_T01_Duration`: `30.0 -> 15.0` or `30.0 -> 1.0`
+- `Alchemy_Bandages_T01_HealthPerTick`: `15.0 -> 30.0` or `15.0 -> 450.0`
 - `Alchemy_Bandages_T01_TickPeriod`: unchanged at `0.5`
 
 ## Preferred Workflow
 
 ```powershell
-python ".\modding_tools\windrose_mod_cli.py" prepare-bandage-speed-mod --project-dir ".\mods\fast-bandages"
-python ".\modding_tools\windrose_mod_cli.py" pack-iostore-mod --input-dir ".\mods\fast-bandages\input\staged" --output-pak ".\mods\fast-bandages\output\FastBandages_P.pak" --install-to-mods "$env:WINDROSE_MODS_DIR"
+python ".\modding_tools\windrose_mod_cli.py" build-mod --project-dir ".\mods\fast-bandages" --install-multipliers "15"
 ```
+
+The 15-second variant remains the default installed variant. The 1-second variant is built and packaged in `output/` for separate testing or publishing.
 
 ## Config Source Priority
 

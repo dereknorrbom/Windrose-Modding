@@ -5,6 +5,7 @@
   "workflow": "bandage_speed",
   "package_mode": "iostore",
   "variants": [
+    1.0,
     15.0
   ],
   "default_install_variant": 15.0,
@@ -16,7 +17,7 @@
   "package_variants": true,
   "validate_outputs": true,
   "nexus": {
-    "summary": "Makes basic bandages heal over 15 seconds instead of 30 while preserving total healing.",
+    "summary": "Makes basic bandages heal over either 15 seconds or 1 second while preserving total healing.",
     "resources": [
       "Bandages"
     ],

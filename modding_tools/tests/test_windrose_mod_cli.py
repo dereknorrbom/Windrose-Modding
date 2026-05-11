@@ -48,12 +48,27 @@ def test_clear_matching_paks_removes_only_matching_files(tmp_path: Path):
     mods_dir.mkdir()
     (mods_dir / "BoarLoot_P.pak").write_bytes(b"x")
     (mods_dir / "BoarLoot_P_x3.pak").write_bytes(b"x")
+    (mods_dir / "BoarLoot_P_x3.ucas").write_bytes(b"x")
+    (mods_dir / "BoarLoot_P_x3.utoc").write_bytes(b"x")
     (mods_dir / "OtherMod.pak").write_bytes(b"x")
     removed = cli.clear_matching_paks(mods_dir, "BoarLoot_P")
     assert removed == 2
     assert not (mods_dir / "BoarLoot_P.pak").exists()
     assert not (mods_dir / "BoarLoot_P_x3.pak").exists()
+    assert (mods_dir / "BoarLoot_P_x3.ucas").exists()
+    assert (mods_dir / "BoarLoot_P_x3.utoc").exists()
     assert (mods_dir / "OtherMod.pak").exists()
+
+
+def test_clear_matching_paks_can_remove_iostore_trio(tmp_path: Path):
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir()
+    (mods_dir / "FastBandages_x15_P.pak").write_bytes(b"x")
+    (mods_dir / "FastBandages_x15_P.ucas").write_bytes(b"x")
+    (mods_dir / "FastBandages_x15_P.utoc").write_bytes(b"x")
+    removed = cli.clear_matching_paks(mods_dir, "FastBandages", (".pak", ".ucas", ".utoc"))
+    assert removed == 3
+    assert not list(mods_dir.iterdir())
 
 
 def test_cmd_pack_pak_filters_scaffold_placeholders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -1450,7 +1465,7 @@ def test_load_recipe_accepts_bandage_speed_iostore_workflow(tmp_path: Path):
                 "pak_name": "FastBandages",
                 "workflow": "bandage_speed",
                 "package_mode": "iostore",
-                "variants": [15.0],
+                "variants": [1.0, 15.0],
                 "default_install_variant": 15.0,
                 "install_target": "single-player",
                 "report_name": "bandage_speed_edit_report",
@@ -1461,16 +1476,24 @@ def test_load_recipe_accepts_bandage_speed_iostore_workflow(tmp_path: Path):
     recipe = cli.load_recipe(project)
     assert recipe.workflow == "bandage_speed"
     assert recipe.package_mode == "iostore"
+    assert recipe.variants == [1.0, 15.0]
 
 
 def test_package_iostore_variant_zips_output_trio(tmp_path: Path):
-    pak = tmp_path / "FastBandages_P_x15.pak"
+    pak = tmp_path / "FastBandages_x15_P.pak"
     pak.write_bytes(b"pak")
     pak.with_suffix(".ucas").write_bytes(b"ucas")
     pak.with_suffix(".utoc").write_bytes(b"utoc")
 
     zip_path = cli.package_iostore_variant(pak)
     assert zip_path.exists()
+
+
+def test_variant_output_path_preserves_iostore_patch_suffix(tmp_path: Path):
+    from windrose_cli.pipelines.build import variant_output_path
+
+    assert variant_output_path(tmp_path / "FastBandages_P.pak", "15", "iostore").name == "FastBandages_x15_P.pak"
+    assert variant_output_path(tmp_path / "GoatBounty_P.pak", "2", "pak").name == "GoatBounty_P_x2.pak"
 
 
 def test_tool_clients_build_expected_external_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

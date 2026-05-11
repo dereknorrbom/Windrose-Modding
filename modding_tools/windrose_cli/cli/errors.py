@@ -19,7 +19,7 @@ def emit_json(payload: dict) -> None:
 def run_with_error_handling(parser: argparse.ArgumentParser, action: Callable[[], int], debug: bool = False) -> int:
     try:
         return action()
-    except (FileNotFoundError, ValueError, RuntimeError, ToolError) as exc:
+    except (OSError, ValueError, RuntimeError, ToolError) as exc:
         if debug:
             raise
         print(f"error: {exc}", file=sys.stderr)

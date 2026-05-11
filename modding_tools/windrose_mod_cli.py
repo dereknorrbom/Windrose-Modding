@@ -27,7 +27,7 @@ from windrose_cli.packaging import package_iostore_variant, package_pak_variant
 from windrose_cli.paths import DEFAULT_GAME_MODS_DIR as PACKAGE_DEFAULT_GAME_MODS_DIR
 from windrose_cli.paths import bin_dir as package_bin_dir
 from windrose_cli.paths import modding_tools_root, workspace_root as package_workspace_root
-from windrose_cli.pipelines.build import install_outputs, validate_package_mode
+from windrose_cli.pipelines.build import install_outputs, validate_package_mode, variant_output_path
 from windrose_cli.recipes import ModRecipe, load_recipe, write_recipe
 from windrose_cli.tools import process as process_runner
 from windrose_cli.tools.common import resolve_tool as resolve_tool_impl
@@ -1127,14 +1127,15 @@ def run_prepare_template(
     run_shell_command(command, cwd=workspace_root())
 
 
-def clear_matching_paks(mods_dir: Path, stem_prefix: str) -> int:
+def clear_matching_paks(mods_dir: Path, stem_prefix: str, suffixes: tuple[str, ...] = (".pak",)) -> int:
     if not mods_dir.exists():
         return 0
     removed = 0
-    for path in mods_dir.glob(f"{stem_prefix}*.pak"):
-        if path.is_file():
-            path.unlink()
-            removed += 1
+    for suffix in suffixes:
+        for path in mods_dir.glob(f"{stem_prefix}*{suffix}"):
+            if path.is_file():
+                path.unlink()
+                removed += 1
     return removed
 
 
@@ -1193,7 +1194,7 @@ def cmd_build_variants(args: argparse.Namespace) -> int:
             variant_staged_dir,
             ignore=shutil.ignore_patterns(*sorted(PACK_IGNORE_FILE_NAMES)),
         )
-        variant_output = output_pak.with_name(f"{output_pak.stem}_x{label}{output_pak.suffix}")
+        variant_output = variant_output_path(output_pak, label, "pak")
 
         if args.prepare_command_template:
             run_prepare_template(
@@ -1542,7 +1543,7 @@ def cmd_build_mod(args: argparse.Namespace) -> int:
             ignore=shutil.ignore_patterns(*sorted(PACK_IGNORE_FILE_NAMES)),
         )
 
-        variant_output = output_pak.with_name(f"{output_pak.stem}_x{label}{output_pak.suffix}")
+        variant_output = variant_output_path(output_pak, label, recipe.package_mode)
         edit_report = prepare_recipe_variant(recipe, project_dir, variant_staged_dir, mult, label, args.repak_path)
 
         should_install = label in install_labels
@@ -1550,7 +1551,10 @@ def cmd_build_mod(args: argparse.Namespace) -> int:
             cmd_backup_mods(argparse.Namespace(mods_dir=str(mods_dir), backup_dir=str(backup_root)))
             backup_done = True
         if should_install:
-            removed = clear_matching_paks(mods_dir, output_pak.stem)
+            if recipe.package_mode == "iostore":
+                removed = clear_matching_paks(mods_dir, recipe.pak_name, (".pak", ".ucas", ".utoc"))
+            else:
+                removed = clear_matching_paks(mods_dir, output_pak.stem)
             if recipe.workflow == "bundle":
                 for included_slug in recipe.included_mods:
                     included_recipe = load_recipe(workspace_root() / "mods" / included_slug)

@@ -20,6 +20,14 @@ def validate_package_mode(mode: str) -> str:
     return normalized
 
 
+def variant_output_path(base_output: Path, label: str, package_mode: str) -> Path:
+    if validate_package_mode(package_mode) == "iostore" and base_output.stem.endswith("_P"):
+        stem = f"{base_output.stem[:-2]}_x{label}_P"
+    else:
+        stem = f"{base_output.stem}_x{label}"
+    return base_output.with_name(f"{stem}{base_output.suffix}")
+
+
 def install_outputs(paths: list[Path], install_dir: Path) -> list[Path]:
     install_dir.mkdir(parents=True, exist_ok=True)
     installed = []
